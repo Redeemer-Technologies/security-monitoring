@@ -1,0 +1,13 @@
+{
+  "17.4.0": "17.4.8.0",
+  "17.5.0": "17.5.4.0",
+  "17.6.0": "17.6.2.0",
+  "notices": {
+    "17.4.0": "   ",
+    "17.5.0": "Upgrade to 17.5.4.0 before installing 17.6.",
+    "17.6.0": [
+      "Security plugin 17.6.2.0 fixes CVE-0001.",
+      "Rotate exposed security tokens after upgrading."
+    ]
+  }
+}

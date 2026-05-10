@@ -1,0 +1,207 @@
+<template>
+    <div class="log-query">
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">
+            {{ errorMessage }}
+        </NotificationBox>
+
+        <Panel v-if="showQueryOnPage" title="Log Query" class="log-query-editor">
+            <CodeEditor v-model="pageQuery"
+                        label="SQL Query"
+                        help="Use [[logs]] in the FROM clause as the IIS log parquet source. Running this query saves it only to your block preferences."
+                        mode="sql"
+                        :rows="12" />
+
+            <SlidingDateRangePicker v-model="dateRange"
+                                    label="Date Range"
+                                    help="Only parquet files whose filename date stamp falls within this range will be included."
+                                    class="log-query-date-range"
+                                    previewLocation="Right"
+                                    :enabledSlidingDateRangeUnits="enabledSlidingDateRangeUnits" />
+
+            <RockButton btnType="primary" :disabled="isLoading" @click="onRunClick">
+                <i class="fa fa-play" aria-hidden></i> Run
+            </RockButton>
+        </Panel>
+
+        <LoadingIndicator v-if="isLoading" :delay="500" />
+
+        <template v-else>
+            <div v-if="isLavaTemplateDisplayMode"
+                 ref="lavaTemplateResultsElement"
+                 class="log-query-lava-results"></div>
+
+            <Grid v-else-if="gridDefinition"
+                  :data="gridDataSource"
+                  :definition="gridDefinition"
+                  :title="gridTitle"
+                  :exportTitle="gridTitle"
+                  :isTitleHidden="isGridTitleHidden"
+                  keyField="uniqueKey"
+                  :liveUpdates="true"
+                  @selectItem="onSelectItem">
+                <DynamicColumns :dynamicFields="dynamicFields"
+                                :columnComponents="columnComponents"
+                                :defaultColumnComponent="TextColumn" />
+            </Grid>
+        </template>
+    </div>
+</template>
+
+<style scoped>
+.log-query-editor {
+    margin-bottom: 1rem;
+}
+
+.log-query-date-range {
+    margin-bottom: 1rem;
+}
+</style>
+
+<script setup lang="ts">
+    import { computed, ref, watch } from "vue";
+    import CodeEditor from "@Obsidian/Controls/codeEditor.obs";
+    import Grid, { BooleanColumn, CurrencyColumn, DateColumn, DateTimeColumn, defaultColumnFilters, DynamicColumns, HtmlColumn, NumberColumn, pickExistingValueFilter, TextColumn } from "@Obsidian/Controls/grid";
+    import LoadingIndicator from "@Obsidian/Controls/loadingIndicator.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import Panel from "@Obsidian/Controls/panel.obs";
+    import RockButton from "@Obsidian/Controls/rockButton.obs";
+    import SlidingDateRangePicker from "@Obsidian/Controls/slidingDateRangePicker.obs";
+    import { getRowKey } from "@Obsidian/Core/Controls/grid";
+    import { setInnerHTML } from "@Obsidian/Core/Utilities/domUtils";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { SlidingDateRangeType } from "@Obsidian/Enums/Controls/slidingDateRangeType";
+    import { onConfigurationValuesChanged, useConfigurationValues, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
+    import { getValueFromPath } from "@Obsidian/Utility/objectUtils";
+    import { ColumnFilter, FilterValueFunction } from "@Obsidian/Types/Controls/grid";
+    import { SlidingDateRangeBag } from "@Obsidian/ViewModels/Controls/slidingDateRangeBag";
+    import { DynamicFieldDefinitionBag } from "@Obsidian/ViewModels/Core/Grid/dynamicFieldDefinitionBag";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { GridDefinitionBag } from "@Obsidian/ViewModels/Core/Grid/gridDefinitionBag";
+    import { LogQueryInitializationBox } from "./ViewModels/logQueryInitializationBox";
+    import { LogQueryRequestBag } from "./ViewModels/logQueryRequestBag";
+    import { LogQueryResponseBag } from "./ViewModels/logQueryResponseBag";
+
+    const config = useConfigurationValues<LogQueryInitializationBox>();
+    const invokeBlockAction = useInvokeBlockAction();
+    const reloadBlock = useReloadBlock();
+
+    const columnComponents = {
+        "boolean": BooleanColumn,
+        "currency": CurrencyColumn,
+        "date": DateColumn,
+        "dateTime": DateTimeColumn,
+        "html": HtmlColumn,
+        "number": NumberColumn,
+        "text": TextColumn
+    };
+
+    const errorMessage = ref(config.errorMessage ?? "");
+    const isLoading = ref(false);
+    const showQueryOnPage = ref(config.showQueryOnPage);
+    const pageQuery = ref(config.currentQuery ?? config.defaultQuery ?? "");
+    const dateRange = ref<SlidingDateRangeBag | null>(config.dateRange ?? null);
+    const isLavaTemplateDisplayMode = ref(config.isLavaTemplateDisplayMode);
+    const gridResults = ref<LogQueryResponseBag["gridResults"]>();
+    const gridData = ref<GridDataBag>({});
+    const navigationUrls = ref<Record<string, string> | null>();
+    const lavaTemplateResults = ref<LogQueryResponseBag["lavaTemplateResults"]>();
+    const lavaTemplateResultsElement = ref<HTMLElement | null>(null);
+    const enabledSlidingDateRangeUnits = [SlidingDateRangeType.Previous, SlidingDateRangeType.Last, SlidingDateRangeType.Current, SlidingDateRangeType.DateRange];
+    const rowSelectionNavigationUrlKey = "RowSelection";
+
+    const gridDataSource = computed(() => Promise.resolve(gridData.value));
+
+    const gridDefinition = computed((): GridDefinitionBag | null | undefined => gridResults.value?.gridDefinition);
+
+    const gridTitle = computed((): string | undefined => gridResults.value?.title ?? undefined);
+
+    const isGridTitleHidden = computed((): boolean => !gridTitle.value);
+
+    const lavaTemplateResultsHtml = computed((): string | undefined | null => lavaTemplateResults.value?.resultsHtml);
+
+    const dynamicFields = computed((): (DynamicFieldDefinitionBag & { filter?: ColumnFilter, filterValue?: FilterValueFunction | string })[] => {
+        return gridDefinition.value?.dynamicFields
+            ?.filter((field: DynamicFieldDefinitionBag) => !!field.columnType)
+            ?.map((field: DynamicFieldDefinitionBag) => {
+                let filter: ColumnFilter | undefined = defaultColumnFilters[field.columnType ?? ""];
+                if (!filter && field.columnType !== "html") {
+                    filter = pickExistingValueFilter;
+                }
+
+                return {
+                    ...field,
+                    filter: field.enableFiltering ? filter : undefined
+                };
+            }) ?? [];
+    });
+
+    async function loadResults(saveUserPreference: boolean): Promise<void> {
+        isLoading.value = true;
+        errorMessage.value = "";
+
+        const bag: LogQueryRequestBag = {
+            query: pageQuery.value,
+            dateRange: dateRange.value,
+            saveUserPreference
+        };
+
+        const result = await invokeBlockAction<LogQueryResponseBag>("GetLogQueryResults", { bag });
+        isLoading.value = false;
+
+        if (!result.isSuccess || !result.data) {
+            errorMessage.value = result.errorMessage || "Unknown error while trying to run the log query.";
+            return;
+        }
+
+        gridResults.value = result.data.gridResults;
+        gridData.value = result.data.gridData ?? {};
+        navigationUrls.value = result.data.navigationUrls ?? null;
+        lavaTemplateResults.value = result.data.lavaTemplateResults;
+    }
+
+    async function onRunClick(): Promise<void> {
+        await loadResults(true);
+    }
+
+    function onSelectItem(rowKey: string): void {
+        let rowSelectionUrl = navigationUrls.value?.[rowSelectionNavigationUrlKey];
+        if (!rowSelectionUrl) {
+            return;
+        }
+
+        if (rowSelectionUrl.startsWith("~")) {
+            rowSelectionUrl = `${window.location.origin}${rowSelectionUrl.substring(1)}`;
+        }
+
+        const columnKeys = rowSelectionUrl.match(/\(\([\w\s]+\)\)/g);
+        if (!(columnKeys?.length)) {
+            window.location.href = rowSelectionUrl;
+            return;
+        }
+
+        const row = gridData.value.rows?.find(r => getRowKey(r, "uniqueKey") === rowKey);
+        if (!row) {
+            return;
+        }
+
+        columnKeys.forEach(columnKey => {
+            const columnName = columnKey.replace(/\(|\)/g, "");
+            const columnValue = String(getValueFromPath(row, columnName));
+
+            if (columnValue) {
+                rowSelectionUrl = rowSelectionUrl?.replace(columnKey, columnValue);
+            }
+        });
+
+        window.location.href = rowSelectionUrl;
+    }
+
+    watch([lavaTemplateResultsElement, lavaTemplateResultsHtml], () => {
+        if (lavaTemplateResultsElement.value && lavaTemplateResultsHtml.value) {
+            setInnerHTML(lavaTemplateResultsElement.value, lavaTemplateResultsHtml.value);
+        }
+    });
+
+    loadResults(false);
+    onConfigurationValuesChanged(reloadBlock);
+</script>

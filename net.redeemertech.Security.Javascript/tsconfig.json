@@ -1,0 +1,57 @@
+{
+  "compilerOptions": {
+    "baseUrl": "./",
+    "outDir": "./dist",
+    "rootDir": "../",
+    "incremental": true,
+    "noImplicitAny": false,
+    "noImplicitOverride": true,
+    "noEmitOnError": false,
+    "removeComments": true,
+    "allowUnreachableCode": false,
+    "forceConsistentCasingInFileNames": true,
+    "sourceMap": true,
+    "target": "ES2019",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "strict": true,
+    "importHelpers": true,
+    "jsx": "preserve",
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ES2016",
+      "ES2020.Symbol.WellKnown"
+    ],
+    "paths": {
+      "@Obsidian/Controls/*": [ "../Rock/Rock.JavaScript.Obsidian/Framework/Controls/*" ],
+      "@Obsidian/Core/*": [ "../Rock/Rock.JavaScript.Obsidian/Framework/Core/*" ],
+      "@Obsidian/Enums/*": [ "../Rock/Rock.JavaScript.Obsidian/Framework/Enums/*" ],
+      "@Obsidian/SystemGuids/*": [ "../Rock/Rock.JavaScript.Obsidian/Framework/SystemGuids/*" ],
+      "@Obsidian/Types": [ "../Rock/Rock.JavaScript.Obsidian/Framework/Types" ],
+      "@Obsidian/Types/*": [ "../Rock/Rock.JavaScript.Obsidian/Framework/Types/*" ],
+      "@Obsidian/Utility/*": [ "../Rock/Rock.JavaScript.Obsidian/Framework/Utility/*" ],
+      "@Obsidian/ValidationRules": [ "../Rock/Rock.JavaScript.Obsidian/Framework/ValidationRules" ],
+      "@Obsidian/ViewModels/*": [ "../Rock/Rock.JavaScript.Obsidian/Framework/ViewModels/*" ]
+    }
+  },
+  "references": [
+    { "path": "../Rock/Rock.JavaScript.Obsidian/Framework/Controls" },
+    { "path": "../Rock/Rock.JavaScript.Obsidian/Framework/Core" },
+    { "path": "../Rock/Rock.JavaScript.Obsidian/Framework/Enums" },
+    { "path": "../Rock/Rock.JavaScript.Obsidian/Framework/SystemGuids" },
+    { "path": "../Rock/Rock.JavaScript.Obsidian/Framework/Utility" },
+    { "path": "../Rock/Rock.JavaScript.Obsidian/Framework/ValidationRules" }
+  ],
+  "vueCompilerOptions": {
+    "extensions": [
+      ".obs"
+    ]
+  },
+  "include": [
+    "./src/**/*.ts",
+    "./src/**/*.d.ts",
+    "./src/**/*.obs"
+  ]
+}

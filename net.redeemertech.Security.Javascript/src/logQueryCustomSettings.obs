@@ -1,0 +1,190 @@
+<template>
+    <Modal v-model="isModalOpen" title="Log Query Settings" :saveText="saveButtonText" @save="onSave">
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">
+            {{ errorMessage }}
+        </NotificationBox>
+
+        <LoadingIndicator v-else-if="isLoading" :delay="500" />
+
+        <template v-else>
+            <SectionHeader title="Query Setup"
+                           description="Write a DuckDB query against the IIS log parquet files. Use [[logs]] as the parquet source placeholder." />
+
+            <CodeEditor v-model="query"
+                        label="Default SQL Query"
+                        help="Use [[logs]] in the FROM clause. Example: FROM [[logs]]"
+                        mode="sql" />
+
+            <SlidingDateRangePicker v-model="dateRange"
+                                    label="Default Date Range"
+                                    help="Only parquet files whose filename date stamp falls within this range will be included."
+                                    previewLocation="Right"
+                                    :enabledSlidingDateRangeUnits="enabledSlidingDateRangeUnits" />
+
+            <div class="row">
+                <div class="col-md-6">
+                    <NumberBox v-model="timeout"
+                               label="Timeout Length"
+                               help="The amount of time in seconds to allow the query to run before timing out."
+                               inputGroupClasses="input-width-md">
+                        <template #inputGroupAppend>
+                            <span class="input-group-addon">sec</span>
+                        </template>
+                    </NumberBox>
+                </div>
+                <div class="col-md-6">
+                    <Switch v-model="showQueryOnPage"
+                            text="Show Query on Page"
+                            help="Shows an editable SQL editor and Run button on the page. The user's most recently run query is saved as a block user preference." />
+                </div>
+            </div>
+
+            <SectionHeader title="Results Formatting"
+                           description="Choose whether the results render as a grid or through a Lava template." />
+
+            <div class="form-group">
+                <ButtonGroup v-model="resultsDisplayMode"
+                             :items="stdDisplayModeItems" />
+            </div>
+
+            <template v-if="!isLavaTemplateDisplayMode">
+                <SectionHeader title="Grid Settings" />
+
+                <TextBox v-model="gridTitle"
+                         label="Grid Title"
+                         class="input-large" />
+
+                <TextBox v-model="selectionUrl"
+                         label="Selection URL"
+                         class="input-large"
+                         help="The URL to redirect individuals to when they click on a row in the grid. Any column's value can be used in the URL by including it in braces. For example: ~/Person/{Id}" />
+            </template>
+
+            <CodeEditor v-else
+                        v-model="lavaTemplate"
+                        label="Lava Template"
+                        help="The template has access to rows and tables."
+                        mode="lava" />
+        </template>
+    </Modal>
+</template>
+
+<script setup lang="ts">
+    import { computed, ref, watch } from "vue";
+    import ButtonGroup from "@Obsidian/Controls/buttonGroup.obs";
+    import CodeEditor from "@Obsidian/Controls/codeEditor.obs";
+    import LoadingIndicator from "@Obsidian/Controls/loadingIndicator.obs";
+    import Modal from "@Obsidian/Controls/modal.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import NumberBox from "@Obsidian/Controls/numberBox.obs";
+    import SectionHeader from "@Obsidian/Controls/sectionHeader.obs";
+    import SlidingDateRangePicker from "@Obsidian/Controls/slidingDateRangePicker.obs";
+    import Switch from "@Obsidian/Controls/switch.obs";
+    import TextBox from "@Obsidian/Controls/textBox.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { SlidingDateRangeType } from "@Obsidian/Enums/Controls/slidingDateRangeType";
+    import { getSecurityGrant, provideSecurityGrant, setCustomSettingsBoxValue, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
+    import { CustomSettingsBox } from "@Obsidian/ViewModels/Blocks/customSettingsBox";
+    import { SlidingDateRangeBag } from "@Obsidian/ViewModels/Controls/slidingDateRangeBag";
+    import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
+    import { LogQueryCustomSettingsBag } from "./ViewModels/logQueryCustomSettingsBag";
+    import { LogQueryCustomSettingsOptionsBag } from "./ViewModels/logQueryCustomSettingsOptionsBag";
+
+    const invokeBlockAction = useInvokeBlockAction();
+    const securityGrant = getSecurityGrant(null);
+    const reloadBlock = useReloadBlock();
+
+    const emit = defineEmits<{
+        (e: "close"): void
+    }>();
+
+    const displayMode = {
+        grid: "grid",
+        lavaTemplate: "lavaTemplate"
+    };
+
+    const errorMessage = ref("");
+    const isLoading = ref(true);
+    const isModalOpen = ref(true);
+
+    const query = ref("");
+    const dateRange = ref<SlidingDateRangeBag | null>(null);
+    const timeout = ref<number | null>(null);
+    const resultsDisplayMode = ref(displayMode.grid);
+    const gridTitle = ref("");
+    const selectionUrl = ref("");
+    const lavaTemplate = ref("");
+    const showQueryOnPage = ref(false);
+
+    const displayModeItems = ref<ListItemBag[]>([]);
+    const enabledSlidingDateRangeUnits = [SlidingDateRangeType.Previous, SlidingDateRangeType.Last, SlidingDateRangeType.Current, SlidingDateRangeType.DateRange];
+
+    const stdDisplayModeItems = computed((): { text: string, value: string }[] => {
+        return displayModeItems.value
+            ?.filter((mode: ListItemBag) => !!(mode.text && mode.value))
+            .map((mode: ListItemBag) => ({
+                text: mode.text ?? "",
+                value: mode.value ?? ""
+            })) ?? [];
+    });
+
+    const isLavaTemplateDisplayMode = computed((): boolean => resultsDisplayMode.value === displayMode.lavaTemplate);
+
+    const saveButtonText = computed((): string => errorMessage.value || !isLoading.value ? "Save" : "");
+
+    async function startLoading(): Promise<void> {
+        const result = await invokeBlockAction<CustomSettingsBox<LogQueryCustomSettingsBag, LogQueryCustomSettingsOptionsBag>>("GetCustomSettings");
+
+        if (result.isSuccess && result.data && result.data.settings && result.data.options) {
+            query.value = result.data.settings.query ?? "";
+            dateRange.value = result.data.settings.dateRange ?? null;
+            timeout.value = result.data.settings.timeout ?? null;
+            resultsDisplayMode.value = result.data.settings.resultsDisplayMode ?? displayMode.grid;
+            gridTitle.value = result.data.settings.gridTitle ?? "";
+            selectionUrl.value = result.data.settings.selectionUrl ?? "";
+            lavaTemplate.value = result.data.settings.lavaTemplate ?? "";
+            showQueryOnPage.value = result.data.settings.showQueryOnPage;
+
+            securityGrant.updateToken(result.data.securityGrantToken);
+            displayModeItems.value = result.data.options.displayModeItems ?? [];
+        }
+        else {
+            errorMessage.value = result.errorMessage || "Unknown error while loading custom settings.";
+        }
+
+        isLoading.value = false;
+    }
+
+    async function onSave(): Promise<void> {
+        const box: CustomSettingsBox<LogQueryCustomSettingsBag, LogQueryCustomSettingsOptionsBag> = {};
+
+        setCustomSettingsBoxValue(box, "query", query.value);
+        setCustomSettingsBoxValue(box, "dateRange", dateRange.value);
+        setCustomSettingsBoxValue(box, "timeout", timeout.value);
+        setCustomSettingsBoxValue(box, "resultsDisplayMode", resultsDisplayMode.value);
+        setCustomSettingsBoxValue(box, "gridTitle", gridTitle.value);
+        setCustomSettingsBoxValue(box, "selectionUrl", selectionUrl.value);
+        setCustomSettingsBoxValue(box, "lavaTemplate", lavaTemplate.value);
+        setCustomSettingsBoxValue(box, "showQueryOnPage", showQueryOnPage.value);
+
+        const result = await invokeBlockAction("SaveCustomSettings", { box });
+
+        if (result.isSuccess) {
+            isModalOpen.value = false;
+            reloadBlock();
+        }
+        else {
+            alert(result.errorMessage || "Unable to save block settings.");
+        }
+    }
+
+    provideSecurityGrant(securityGrant);
+
+    watch(isModalOpen, () => {
+        if (!isModalOpen.value) {
+            emit("close");
+        }
+    });
+
+    startLoading();
+</script>

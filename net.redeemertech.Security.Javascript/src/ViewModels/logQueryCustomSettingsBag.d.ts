@@ -2,6 +2,7 @@ import { SlidingDateRangeBag } from "@Obsidian/ViewModels/Controls/slidingDateRa
 
 export type LogQueryCustomSettingsBag = {
     query?: string | null;
+    queryParams?: string | null;
     dateRange?: SlidingDateRangeBag | null;
     timeout?: number | null;
     resultsDisplayMode?: string | null;

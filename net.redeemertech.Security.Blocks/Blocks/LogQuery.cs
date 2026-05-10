@@ -59,6 +59,11 @@ namespace net.redeemertech.Security.Blocks.Blocks
         Category = "CustomSetting",
         DefaultValue = DefaultQuery,
         IsRequired = true )]
+    [TextField( "Query Parameters",
+        Key = AttributeKey.QueryParams,
+        Description = "Specify the parameters required by the query using the format 'param1=value;param2=value'. Parameters matching URL page parameter values will automatically use those values. Use DuckDB named parameters in SQL like $param1.",
+        Category = "CustomSetting",
+        IsRequired = false )]
     [SlidingDateRangeField( "Date Range",
         Key = AttributeKey.DateRange,
         Description = "Only parquet files whose filename date stamp falls within this range will be included in the query.",
@@ -148,6 +153,7 @@ LIMIT 100";
             public const string MaximumParquetFiles = "MaximumParquetFiles";
             public const string EnabledLavaCommands = "EnabledLavaCommands";
             public const string Query = "Query";
+            public const string QueryParams = "QueryParams";
             public const string DateRange = "DateRange";
             public const string Timeout = "Timeout";
             public const string ResultsDisplayMode = "ResultsDisplayMode";
@@ -235,6 +241,7 @@ LIMIT 100";
             var settings = new LogQueryCustomSettingsBag
             {
                 Query = GetDefaultQuery(),
+                QueryParams = GetAttributeValue( AttributeKey.QueryParams ),
                 DateRange = GetDateRangeBag(),
                 Timeout = GetAttributeValue( AttributeKey.Timeout ).AsIntegerOrNull(),
                 ResultsDisplayMode = GetResultsDisplayMode(),
@@ -269,6 +276,7 @@ LIMIT 100";
             block.LoadAttributes( this.RockContext );
 
             box.IfValidProperty( nameof( box.Settings.Query ), () => block.SetAttributeValue( AttributeKey.Query, box.Settings.Query ) );
+            box.IfValidProperty( nameof( box.Settings.QueryParams ), () => block.SetAttributeValue( AttributeKey.QueryParams, box.Settings.QueryParams ) );
             box.IfValidProperty( nameof( box.Settings.DateRange ), () => block.SetAttributeValue( AttributeKey.DateRange, ToDelimitedDateRange( box.Settings.DateRange ) ) );
             box.IfValidProperty( nameof( box.Settings.Timeout ), () => block.SetAttributeValue( AttributeKey.Timeout, box.Settings.Timeout.ToString() ) );
             box.IfValidProperty( nameof( box.Settings.ResultsDisplayMode ), () => block.SetAttributeValue( AttributeKey.ResultsDisplayMode, box.Settings.ResultsDisplayMode ) );
@@ -290,7 +298,8 @@ LIMIT 100";
             {
                 result.MergeFields = GetMergeFields();
                 query = PrepareQuery( query, dateRange );
-                var dataTable = ExecuteQuery( query, loadRows, timeout );
+                var sqlParameters = GetSqlParameters( GetAttributeValue( AttributeKey.QueryParams ).SplitDelimitedValues() );
+                var dataTable = ExecuteQuery( query, loadRows, timeout, sqlParameters );
 
                 result.DataTable = dataTable;
                 result.ActualColumnConfigurations = LoadColumnConfigurationsFromDataTable( dataTable );
@@ -428,7 +437,7 @@ LIMIT 100";
             return query;
         }
 
-        private DataTable ExecuteQuery( string query, bool loadRows, int? timeout )
+        private DataTable ExecuteQuery( string query, bool loadRows, int? timeout, Dictionary<string, object> sqlParameters )
         {
             var sql = loadRows ? query : "SELECT * FROM (" + query + ") __log_query_schema LIMIT 0";
 
@@ -440,12 +449,75 @@ LIMIT 100";
                     command.CommandText = sql;
                     command.CommandTimeout = timeout ?? GetAttributeValue( AttributeKey.Timeout ).AsIntegerOrNull() ?? 30;
 
+                    AddSqlParameters( command, sqlParameters );
+
                     using ( var reader = command.ExecuteReader() )
                     {
                         return LoadDataTable( reader );
                     }
                 }
             }
+        }
+
+        private void AddSqlParameters( DuckDBCommand command, Dictionary<string, object> sqlParameters )
+        {
+            if ( sqlParameters == null || !sqlParameters.Any() )
+            {
+                return;
+            }
+
+            foreach ( var sqlParameter in sqlParameters )
+            {
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = sqlParameter.Key;
+                parameter.Value = sqlParameter.Value ?? DBNull.Value;
+                command.Parameters.Add( parameter );
+            }
+        }
+
+        private Dictionary<string, object> GetSqlParameters( string[] queryParams )
+        {
+            if ( queryParams == null || queryParams.Length == 0 )
+            {
+                return null;
+            }
+
+            var sqlParameters = new Dictionary<string, object>();
+            foreach ( var queryParam in queryParams )
+            {
+                var paramParts = queryParam.Split( new[] { '=' }, 2 );
+                if ( paramParts.Length != 2 )
+                {
+                    continue;
+                }
+
+                var queryParamName = paramParts[0].Trim();
+                if ( queryParamName.IsNullOrWhiteSpace() )
+                {
+                    continue;
+                }
+
+                var queryParamValue = paramParts[1];
+
+                if ( queryParamName.StartsWith( "@" ) || queryParamName.StartsWith( "$" ) )
+                {
+                    queryParamName = queryParamName.Substring( 1 );
+                }
+
+                var pageValue = PageParameter( queryParamName );
+                if ( pageValue.IsNotNullOrWhiteSpace() )
+                {
+                    queryParamValue = pageValue;
+                }
+                else if ( queryParamName.Equals( "CurrentPersonId", StringComparison.OrdinalIgnoreCase ) && this.RequestContext.CurrentPerson != null )
+                {
+                    queryParamValue = this.RequestContext.CurrentPerson.Id.ToString();
+                }
+
+                sqlParameters.AddOrReplace( queryParamName, queryParamValue );
+            }
+
+            return sqlParameters;
         }
 
         private DataTable LoadDataTable( IDataReader reader )
@@ -493,6 +565,12 @@ LIMIT 100";
                 return DBNull.Value;
             }
 
+            var duckDbNativeValue = ConvertDuckDbNativeValue( value );
+            if ( duckDbNativeValue != null )
+            {
+                return duckDbNativeValue;
+            }
+
             if ( targetType == typeof( string ) )
             {
                 return value.ToString();
@@ -511,6 +589,36 @@ LIMIT 100";
             {
                 return value.ToString();
             }
+        }
+
+        private object ConvertDuckDbNativeValue( object value )
+        {
+            var valueType = value.GetType();
+            if ( valueType.Namespace != "DuckDB.NET.Native" )
+            {
+                return null;
+            }
+
+            if ( valueType.Name == "DuckDBTimeOnly" )
+            {
+                var hour = ( byte ) valueType.GetProperty( "Hour" ).GetValue( value );
+                var minute = ( byte ) valueType.GetProperty( "Min" ).GetValue( value );
+                var second = ( byte ) valueType.GetProperty( "Sec" ).GetValue( value );
+                var microsecond = ( int ) valueType.GetProperty( "Microsecond" ).GetValue( value );
+
+                var time = string.Format( "{0:00}:{1:00}:{2:00}", hour, minute, second );
+                return microsecond > 0
+                    ? time + "." + microsecond.ToString( "000000" ).TrimEnd( '0' )
+                    : time;
+            }
+
+            var toDateTimeMethod = valueType.GetMethod( "ToDateTime", Type.EmptyTypes );
+            if ( toDateTimeMethod != null )
+            {
+                return ( ( DateTime ) toDateTimeMethod.Invoke( value, null ) ).ToString( "o" );
+            }
+
+            return value.ToString();
         }
 
         private List<string> GetParquetFiles( SlidingDateRangeBag dateRange )
@@ -624,6 +732,12 @@ LIMIT 100";
         {
             var mergeFields = this.RequestContext.GetCommonMergeFields();
             mergeFields.AddOrReplace( "CurrentPage", this.PageCache );
+
+            foreach ( var pageParam in this.RequestContext.GetPageParameters() )
+            {
+                mergeFields.AddOrReplace( pageParam.Key, pageParam.Value );
+            }
+
             return mergeFields;
         }
 

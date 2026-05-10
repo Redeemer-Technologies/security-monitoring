@@ -12,8 +12,13 @@
 
             <CodeEditor v-model="query"
                         label="Default SQL Query"
-                        help="Use [[logs]] in the FROM clause. Example: FROM [[logs]]"
+                        help="Use [[logs]] in the FROM clause. Example: FROM [[logs]]. Use named DuckDB SQL parameters like $ipAddress."
                         mode="sql" />
+
+            <TextBox v-model="queryParams"
+                     label="Query Parameters"
+                     class="input-large"
+                     help="Specify the parameters required by the query using the format 'param1=value;param2=value'. Parameters matching URL page parameter values will automatically use those values. Use DuckDB named parameters in SQL like $param1." />
 
             <SlidingDateRangePicker v-model="dateRange"
                                     label="Default Date Range"
@@ -108,6 +113,7 @@
     const isModalOpen = ref(true);
 
     const query = ref("");
+    const queryParams = ref("");
     const dateRange = ref<SlidingDateRangeBag | null>(null);
     const timeout = ref<number | null>(null);
     const resultsDisplayMode = ref(displayMode.grid);
@@ -137,6 +143,7 @@
 
         if (result.isSuccess && result.data && result.data.settings && result.data.options) {
             query.value = result.data.settings.query ?? "";
+            queryParams.value = result.data.settings.queryParams ?? "";
             dateRange.value = result.data.settings.dateRange ?? null;
             timeout.value = result.data.settings.timeout ?? null;
             resultsDisplayMode.value = result.data.settings.resultsDisplayMode ?? displayMode.grid;
@@ -159,6 +166,7 @@
         const box: CustomSettingsBox<LogQueryCustomSettingsBag, LogQueryCustomSettingsOptionsBag> = {};
 
         setCustomSettingsBoxValue(box, "query", query.value);
+        setCustomSettingsBoxValue(box, "queryParams", queryParams.value);
         setCustomSettingsBoxValue(box, "dateRange", dateRange.value);
         setCustomSettingsBoxValue(box, "timeout", timeout.value);
         setCustomSettingsBoxValue(box, "resultsDisplayMode", resultsDisplayMode.value);

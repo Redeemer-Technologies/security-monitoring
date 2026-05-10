@@ -6,6 +6,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
     {
         public string Query { get; set; }
 
+        public string QueryParams { get; set; }
+
         public SlidingDateRangeBag DateRange { get; set; }
 
         public int? Timeout { get; set; }

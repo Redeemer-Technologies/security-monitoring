@@ -186,7 +186,7 @@
 
         columnKeys.forEach(columnKey => {
             const columnName = columnKey.replace(/\(|\)/g, "");
-            const columnValue = String(getValueFromPath(row, columnName));
+            const columnValue = encodeURIComponent(String(getValueFromPath(row, columnName)));
 
             if (columnValue) {
                 rowSelectionUrl = rowSelectionUrl?.replace(columnKey, columnValue);

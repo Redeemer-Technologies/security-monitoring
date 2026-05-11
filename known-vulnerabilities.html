@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Known Vulnerabilities | Redeemer Tech Security Plugin</title>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("docs-theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation menu">
+        <svg class="icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <line x1="4" y1="7" x2="20" y2="7"/>
+          <line x1="4" y1="12" x2="20" y2="12"/>
+          <line x1="4" y1="17" x2="20" y2="17"/>
+        </svg>
+        <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <line x1="6" y1="6" x2="18" y2="18"/>
+          <line x1="6" y1="18" x2="18" y2="6"/>
+        </svg>
+      </button>
+      <a class="brand" href="index.html">Redeemer Tech Security <span class="brand-tag">Docs</span></a>
+    </div>
+    <div class="topbar-right">
+      <nav aria-label="Primary">
+        <a href="index.html">Reference</a>
+        <a aria-current="page" href="known-vulnerabilities.html">Known Vulnerabilities</a>
+      </nav>
+      <button class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle color theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/>
+          <line x1="12" y1="2" x2="12" y2="5"/>
+          <line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="2" y1="12" x2="5" y2="12"/>
+          <line x1="19" y1="12" x2="22" y2="12"/>
+          <line x1="4.5" y1="4.5" x2="6.5" y2="6.5"/>
+          <line x1="17.5" y1="17.5" x2="19.5" y2="19.5"/>
+          <line x1="4.5" y1="19.5" x2="6.5" y2="17.5"/>
+          <line x1="17.5" y1="6.5" x2="19.5" y2="4.5"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="sidebar-backdrop" hidden></div>
+
+  <div class="layout">
+    <aside id="sidebar" class="sidebar" aria-label="Section navigation">
+      <h4>On this page</h4>
+      <ul>
+        <li><a href="#about">About this page</a></li>
+        <li><a href="#schema">Notice schema</a></li>
+        <li><a href="#entries">Current entries</a></li>
+        <li><a href="#template">Entry template</a></li>
+      </ul>
+
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="index.html">Plugin reference</a></li>
+        <li><a href="index.html#check-plugin-version">Plugin version check</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <header>
+        <p class="breadcrumb"><a href="index.html">Docs</a> &rsaquo; Known Vulnerabilities</p>
+        <h1>Known Vulnerabilities</h1>
+        <p class="lede">Human-readable explanations for the version notices emitted by the Security Audit job's plugin version check.</p>
+      </header>
+
+      <section id="about">
+        <h2>About this page <a class="anchor" href="#about">#</a></h2>
+        <p>The Security Audit job downloads <code>security-plugin-versions.json</code> and surfaces any notice associated with the running Rock version. This page documents the reasoning behind each notice, including affected versions, risk, and recommended action. Entries should remain factual and tied to a notice in the published versions file.</p>
+      </section>
+
+      <section id="schema">
+        <h2>Notice schema <a class="anchor" href="#schema">#</a></h2>
+        <p>The <code>notices</code> object in <code>security-plugin-versions.json</code> maps a Rock version to a short message. The Security Audit job displays the message verbatim; this page is the long-form companion.</p>
+
+        <pre><code>{
+  "notices": {
+    "17.1.0": "If you're using Microsoft Entra or Auth0 in Rock Mobile...",
+    "17.6.0": "Rock 17.6 improves security and includes...",
+    "18.1.0": "The Self-Service Kiosk (Preview) site and related blocks..."
+  }
+}</code></pre>
+      </section>
+
+      <section id="entries">
+        <h2>Current entries <a class="anchor" href="#entries">#</a></h2>
+
+        <div class="callout">
+          <p class="callout-title">Status</p>
+          <p>No published entries. The Security Audit job will continue to surface notices from <code>security-plugin-versions.json</code> while detailed entries are being prepared.</p>
+        </div>
+      </section>
+
+      <section id="template">
+        <h2>Entry template <a class="anchor" href="#template">#</a></h2>
+        <p>Use the structure below when adding a new entry. Each entry should correspond to exactly one notice in <code>security-plugin-versions.json</code>.</p>
+
+        <h3>Vulnerability or notice title</h3>
+        <dl class="params">
+          <div>
+            <dt>Affected Rock versions</dt>
+            <dd>For example, <code>17.5.0</code> through <code>17.5.3</code>.</dd>
+          </div>
+          <div>
+            <dt>Plugin notice</dt>
+            <dd>The exact message published in <code>security-plugin-versions.json</code>.</dd>
+          </div>
+          <div>
+            <dt>Risk</dt>
+            <dd>The practical security or operational exposure the notice is intended to communicate.</dd>
+          </div>
+          <div>
+            <dt>Recommended action</dt>
+            <dd>The Rock upgrade, plugin upgrade, configuration change, or manual review that resolves the notice.</dd>
+          </div>
+        </dl>
+      </section>
+
+      <footer class="site-footer">
+        <p>Redeemer Tech Security Plugin documentation.</p>
+        <p><a href="index.html">Back to reference</a></p>
+      </footer>
+    </main>
+  </div>
+
+  <script src="docs.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Security Plugin Documentation</title>
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem("docs-theme");
+                if (t === "light" || t === "dark") {
+                    document.documentElement.setAttribute("data-theme", t);
+                }
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
+</head>
+
+<body>
+    <header class="topbar">
+        <div class="topbar-left">
+            <button class="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false"
+                aria-label="Toggle navigation menu">
+                <svg class="icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" aria-hidden="true">
+                    <line x1="4" y1="7" x2="20" y2="7" />
+                    <line x1="4" y1="12" x2="20" y2="12" />
+                    <line x1="4" y1="17" x2="20" y2="17" />
+                </svg>
+                <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" aria-hidden="true">
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                    <line x1="6" y1="18" x2="18" y2="6" />
+                </svg>
+            </button>
+            <a class="brand logo-light" href="https://redeemertech.com"><img src="/logo-light.svg" alt="Redeemer Tech"
+                    style="width: 100px;"> <span class="brand-tag">Docs</span></a>
+            <a class="brand logo-dark" href="https://redeemertech.com"><img src="/logo-dark.svg" alt="Redeemer Tech"
+                    style="width: 100px;"> <span class="brand-tag">Docs</span></a>
+        </div>
+        <div class="topbar-right">
+            <button class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle color theme">
+                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4" />
+                    <line x1="12" y1="2" x2="12" y2="5" />
+                    <line x1="12" y1="19" x2="12" y2="22" />
+                    <line x1="2" y1="12" x2="5" y2="12" />
+                    <line x1="19" y1="12" x2="22" y2="12" />
+                    <line x1="4.5" y1="4.5" x2="6.5" y2="6.5" />
+                    <line x1="17.5" y1="17.5" x2="19.5" y2="19.5" />
+                    <line x1="4.5" y1="19.5" x2="6.5" y2="17.5" />
+                    <line x1="17.5" y1="6.5" x2="19.5" y2="4.5" />
+                </svg>
+                <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="sidebar-backdrop" hidden></div>
+
+    <div class="layout">
+        <aside id="sidebar" class="sidebar" aria-label="Section navigation">
+            <h4>Getting started</h4>
+            <ul>
+                <li><a href="#overview">Overview</a></li>
+                <li><a href="#installation">Installation</a></li>
+            </ul>
+
+            <h4>IIS Logs</h4>
+            <ul>
+                <li><a href="#iis-process-job">Process IIS Logs job</a></li>
+                <li><a href="#iis-query-block">IIS Log Query block</a></li>
+                <li><a href="#iis-query-syntax">Query syntax</a></li>
+                <li><a href="#iis-parameters">Block attributes</a></li>
+            </ul>
+
+            <h4>Security Audit Job</h4>
+            <ul>
+                <li><a href="#security-audit">Job summary</a></li>
+                <li><a href="#audit-checks">Checks</a>
+                    <ul>
+                        <li><a href="#check-plugin-version">Plugin version</a></li>
+                        <li><a href="#check-predictable-ids">Predictable Ids</a></li>
+                        <li><a href="#check-password-regex">Password regex</a></li>
+                        <li><a href="#check-role-membership">Role membership</a></li>
+                        <li><a href="#check-injection">Injection content</a></li>
+                        <li><a href="#check-binary-files">Binary file types</a></li>
+                        <li><a href="#check-document-types">Document types</a></li>
+                    </ul>
+                </li>
+                <li><a href="#audit-settings">Job settings</a></li>
+            </ul>
+
+
+            <!-- <h4>Reference</h4>
+            <ul>
+                <li><a href="known-vulnerabilities.html">Known vulnerabilities</a></li>
+            </ul> -->
+        </aside>
+
+        <main class="content">
+            <header>
+                <h1>Security Plugin for Rock</h1>
+                <!-- <p class="lede">Improve your security posture by being notified about known configuration loopholes and monitor your IIS Logs. </p> -->
+            </header>
+
+            <section id="overview">
+                <h2>Overview <a class="anchor" href="#overview">#</a></h2>
+                <p> This plugin is designed to help improve your Rock security posture by allowing you to monitor your IIS Logs from within Rock and providing you with notifications about security configuration problems with your Rock instance. The plugin consists of two Rock service jobs and one block. Each component is independent and can be
+                    enabled, scheduled, or omitted as needed.</p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Component</th>
+                                <th>Type</th>
+                                <th>Purpose</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>Security Audit Job</code></td>
+                                <td>Rock Job</td>
+                                <td>Runs a suite of pass/fail checks against Rock security settings and known configuration issues.</td>
+                            </tr>
+                            <tr>
+                                <td><code>Process IIS Logs Job</code></td>
+                                <td>Rock Job</td>
+                                <td>Incrementally converts IIS W3C log files to compressed parquet files in
+                                    <code>App_Data</code> for performant querying.</td>
+                            </tr>
+                            <tr>
+                                <td><code>IIS Log Query Block</code></td>
+                                <td>Rock Block</td>
+                                <td>Executes DuckDB SQL queries against the your processed IIS logs.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="installation">
+                <h2>Installation <a class="anchor" href="#installation">#</a></h2>
+                <ol>
+                    <li>Download the latest release from for your Rock version.</li>
+                    <li>Configure the Security Audit job and the Process IIS Logs job under <kbd>Admin Tools</kbd>
+                        &rsaquo; <kbd>System Settings</kbd> &rsaquo; <kbd>Jobs Administration</kbd>.</li>
+                    <li>Monitor your IIS logs under Installed Plugins -> IIS Logs, or run ad-hoc queries from Power Tools -> IIS Log Query</li>
+                </ol>
+                <div class="callout">
+                    <p class="callout-title">Note</p>
+                    <p>Check the Process IIS Logs job to ensure it was able to find your IIS logs.</p>
+                </div>
+            </section>
+
+            <hr>
+
+            <h1>IIS Logs</h1>
+
+            <section id="iis-logs-overview">
+                <h2>Overview <a class="anchor" href="#iis-logs-overview">#</a></h2>
+                <p>Analyzing your IIS logs can be an important part of monitoring for and investigating potential security incidents. This plugin provides a built-in mechanism for processing your IIS logs into a format optimized for querying from within Rock. By default, the plugin looks for IIS W3C log files in the standard log directory, but you can configure a custom path if needed.</p>
+
+                <p>The plugin creates a set of pages under Installed Plugins -> IIS Analytics that are pre-configured with a set of reports. These pages can be customized or extended with additional IIS Log Query blocks as needed.</p>
+
+                <div class="callout">
+                    <p class="callout-title">Additional Log Fields</p>
+                    <p>To get the most out of the built-in reports you should enable the <code>cs-host</code> and <code>sc-bytes</code> fields on your IIS logs. These will allow you to see which Rock site a request was made against as well as how many bytes were returned by that request.</p>
+                </div>
+
+                <img src="rUR9cThfRs.png" alt="IIS Analytics logs" style="width: 100%;">
+            </section> 
+
+            <section id="iis-process-job">
+                <h2>Process IIS Logs Job <a class="anchor" href="#iis-process-job">#</a></h2>
+                <p>This job incrementally converts IIS W3C log files into compressed parquet files for faster querying. The job tracks file offsets
+                    between runs so only new, complete lines are processed each invocation. By default, it will process your logs every five minutes, which can be lengthened or shortened if necessary.</p>
+
+                
+                <div class="callout warn">
+                    <p class="callout-title">Warning</p>
+                    <p>The first time this job runs, it will process all of the logs for your configured retention period. This may take up to ten minutes depending upon how many logs are on your system.</p>
+                </div>
+
+            </section>
+
+            <section id="iis-query-block">
+                <h2>IIS Log Query Block <a class="anchor" href="#iis-query-block">#</a></h2>
+                <p>This block, similar to the built-in Dynamic Data block, allows you to write SQL Queries against the parquet files produced by the Process IIS Logs job. It can render the
+                    results either as a Rock grid or through a Lava template. The provided IIS Analytics pages make use of this block and ChartJS to display their data.</p>
+
+                <h3 id="iis-query-syntax">Query syntax <a class="anchor" href="#iis-query-syntax">#</a></h3>
+                <p>Queries must contain the literal token <code>[[logs]]</code> where the parquet source should be
+                    injected. SQL queries must be written for DuckDB, which has a slightly different syntax than Rock's usual T-SQL queries. Notably, DuckDB uses <code>LIMIT</code> instead of <code>TOP</code> for limiting results, and uses <code>"</code> for quoting identifiers instead of
+                    <code>[</code> and <code>]</code>. For example, the following query would return the 100 most recent log entries:</p>
+                </p>
+
+                <pre><code>SELECT *
+FROM [[logs]]
+ORDER BY "date" DESC, "time" DESC
+LIMIT 100</code></pre>
+
+                <h3 id="iis-parameters">Block Attributes <a class="anchor" href="#iis-parameters">#</a></h3>
+                <dl class="params">
+                    <div>
+                        <dt><code>Default SQL Query</code><span class="type">SQL</span></dt>
+                        <dd>The query to use for the block. If show query on page is enabled, this query can be edited at runtime by the user.</dd>
+                    </div>
+                    <div>
+                        <dt><code>Query Parameters</code><span class="type">string, optional</span></dt>
+                        <dd>Similar to the dynamic data block, this is a semi-colon separated list of query parameters that can be used within the SQL query, in the format <code>param1=value1;param2=value2</code>. Note, when using the parameters
+                        in your query, use a named parameter with a dollar sign, for example <code>WHERE "date" = $param1</code>.</dd>
+                    </div>
+                    <div>
+                        <dt><code>DateRange</code><span class="type">Date range, optional</span></dt>
+                        <dd>Limits the logs included in the query to those within the selected range. When
+                            omitted, all available parquet files (up to the maximum file limit) are included.
+                            Using a smaller range if you know the approximate date of the logs you're looking for can speed up query performance by reducing the number of logs that need to be scanned.
+                        </dd>
+                    </div>
+                    <div>
+                        <dt><code>MaximumParquetFiles</code><span class="type">Integer</span></dt>
+                        <dd>Caps the number of parquet files read in a single query as a guard against unbounded scans.
+                        </dd>
+                    </div>
+                    <div>
+                        <dt><code>ResultRenderMode</code><span class="type">Enum</span></dt>
+                        <dd>Either <code>Grid</code> for a standard Rock grid or <code>Lava</code> for a custom template
+                            rendered against the query results. A default lava template is included to show you the syntax. </dd>
+                    </div>
+                </dl>
+            </section>
+            <br><br>
+
+            <h1 id="security-audit">Security Audit</h1>
+
+            <section>
+                <h2>Overview <a class="anchor" href="#security-audit-overview">#</a></h2>
+                <p>The Security Audit is a Rock job that runs a series of checks against the current Rock configuration and returns a pass/fail summary in the job result. When email notifications are enabled on the job, the same summary is sent through the standard Rock service job notification email setting.</p>
+
+                <img src="/audit.png" style="width:100%" alt="Security Audit Job results showing a list of checks with pass/fail status">
+            </section>
+
+            <section id="security-audit">
+                <h2 id="audit-checks">Checks <a class="anchor" href="#audit-checks">#</a></h2>
+
+                <p>The following checks are run each time the Security Audit job is executed.</p>
+                
+                <h4 id="check-role-membership">Security role memberships</h4>
+                <p>Snapshots active members of the <em>Rock Administrators</em>, <em>Staff Workers</em>, and
+                    <em>Staff-Like Workers</em> roles on the first run. Subsequent runs fail when membership changes and
+                    list the people added or removed since the previous snapshot.</p>
+
+                <h4 id="check-binary-files">Binary file type security</h4>
+                <p>Checks all BinaryFile types, excluding any whitelisted types defined in the job settings,
+                    and fails the check for any type that allows public view
+                    access.</p>
+
+                <h4 id="check-document-types">Document type security</h4>
+                <p>Checks all Document types, excluding any whitelisted types defined in the job settings, and
+                    fails the check for any type that allows public view access.</p>
+
+                <h4 id="check-predictable-ids">Disable Predictable Ids</h4>
+                <p>Fails when Rock's <code>DisablePredictableIds</code> setting is not enabled. This setting prevents
+                    predictable integer identifiers from being accepted by Rock's file handlers (GetFile.ashx.cs, GetImage.ashx, and GetAvatar.ashx).
+                    When this setting is disabled, those handlers can be polled with incremental ids to probe for insecure files. 
+                </p>
+
+                <h4 id="check-password-regex">Password Regular Expression</h4>
+                <p>Reads the <code>PasswordRegularExpression</code> global attribute. The check fails when the value is
+                    blank or still set to Rock's default of <code>\w{6,255}</code>, which is far too weak for secure passwords.</p>
+
+                <h4 id="check-injection">Injection-style content</h4>
+                <p>Searches Person and Location fields for values containing potential injection-style content. Matches do not
+                    indicate exploitation, but flag values that should be reviewed and cleaned.</p>
+
+                <div class="callout warn">
+                    <p class="callout-title">Warning</p>
+                    <p>If you see an address or a person record returned by the injection audit, You should use SQL to review and clean up the values. Loading the person record or location in Rock may cause malicious code to run on your system. </p>
+                </div>
+
+                <h4 id="check-plugin-version">Security plugin version</h4>
+                <p>Downloads <code>security-plugin-versions.json</code> from the published source and compares the
+                    installed plugin version with the latest version published for the current Rock version.
+                    This helps ensure that the information from the plugin is the latest available. It also what includes any known security issues with your current version of Rock in the audit email. </p>
+
+
+                <h3 id="audit-settings">Job settings <a class="anchor" href="#audit-settings">#</a></h3>
+                <dl class="params">
+                    <div>
+                        <dt><code>BinaryFileType Whitelist</code><span class="type">Binary File Type list, optional</span></dt>
+                        <dd>A list of binary file type names to exclude from the binary file type auth
+                            check. If you have a file type that you intentionally want to be open to the public, you can select it and the job will not warn you about that file type. </dd>
+                    </div>
+                    <div>
+                        <dt><code>DocumentType Whitelist</code><span class="type">Document Type list, optional</span></dt>
+                        <dd>Comma-delimited list of document type names or Guids to exclude from the document type
+                            check.</dd>
+                    </div>
+                </dl>
+            </section>
+
+
+            <footer class="site-footer">
+                <p>Redeemer Tech Security Plugin documentation.</p>
+                <p><a href="known-vulnerabilities.html">Known vulnerabilities</a></p>
+            </footer>
+        </main>
+    </div>
+
+    <script src="docs.js" defer></script>
+</body>
+
+</html>

@@ -1,0 +1,19 @@
+{
+  "17.1.0": "17.0.0.0",
+  "17.2.0": "17.0.0.0",
+  "17.3.0": "17.0.0.0",
+  "17.4.0": "17.0.0.0",
+  "17.5.0": "17.0.0.0",
+  "17.6.0": "17.0.0.0",
+  "17.7.0": "17.0.0.0",
+  "18.1.0": "17.0.0.0",
+  "18.2.0": "17.0.0.0",
+  "notices": {
+    "17.1.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
+    "17.2.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
+    "17.3.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
+    "17.4.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
+    "17.5.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
+    "17.6.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible."
+  }
+}

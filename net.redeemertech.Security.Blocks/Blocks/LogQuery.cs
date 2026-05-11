@@ -411,7 +411,7 @@ LIMIT 100";
             var parquetFiles = GetParquetFiles( dateRange );
             if ( !parquetFiles.Any() )
             {
-                throw new InvalidOperationException( "No parquet files were found in the configured parquet folder for the selected date range." );
+                throw new InvalidOperationException( "No parquet files were found in the configured parquet folder for the selected date range. Please verify the Process IIS Logs jobs is running and that the IIS logs path is correct." );
             }
 
             var fileList = "[" + parquetFiles.Select( f => "'" + EscapeSqlString( f ) + "'" ).JoinStrings( "," ) + "]";

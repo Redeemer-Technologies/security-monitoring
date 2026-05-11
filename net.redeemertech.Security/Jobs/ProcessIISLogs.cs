@@ -36,7 +36,7 @@ namespace net.redeemertech.Security
     [IntegerField( "Retain Parquet Files For Days",
         "IIS log files last modified before this retention window will be skipped, and parquet files representing older log entries will be deleted each time the job runs.",
         true,
-        365,
+        730,
         key: AttributeKey.RetentionDays,
         order: 2 )]
     [BooleanField( "Re-process all files on next run",
@@ -570,10 +570,15 @@ namespace net.redeemertech.Security
             var systemDrive = Environment.GetEnvironmentVariable( "SystemDrive" );
             if ( systemDrive.IsNullOrWhiteSpace() )
             {
-                systemDrive = "C:";
+                systemDrive = Path.GetPathRoot( Environment.SystemDirectory );
             }
 
-            return Path.Combine( systemDrive, "inetpub", "logs", "LogFiles" );
+            if ( systemDrive.IsNullOrWhiteSpace() )
+            {
+                systemDrive = @"C:\";
+            }
+
+            return Path.Combine( systemDrive.TrimEnd( Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar ) + Path.DirectorySeparatorChar, "inetpub", "logs", "LogFiles" );
         }
 
         private string ResolveParquetFolder()

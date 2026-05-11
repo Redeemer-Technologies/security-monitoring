@@ -97,6 +97,7 @@
     <Compile Include="Jobs\ProcessIISLogs.cs" />
     <Compile Include="Jobs\SecurityAudit.cs" />
     <Compile Include="Migration\001_Pages.cs" />
+    <Compile Include="Migration\002_Jobs.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

@@ -415,7 +415,7 @@ LIMIT 100";
             }
 
             var fileList = "[" + parquetFiles.Select( f => "'" + EscapeSqlString( f ) + "'" ).JoinStrings( "," ) + "]";
-            var logsFromSql = "read_parquet(" + fileList + ", union_by_name = true)";
+            var logsFromSql = "( SELECT CAST(NULL AS BIGINT) AS \"sc-bytes\", CAST(NULL AS VARCHAR) AS \"cs-host\" WHERE 1 = 0 UNION ALL BY NAME SELECT * FROM read_parquet(" + fileList + ", union_by_name = true) )";
 
             return query.Replace( LogsPlaceholder, logsFromSql );
         }

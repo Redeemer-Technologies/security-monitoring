@@ -58,6 +58,7 @@ namespace net.redeemertech.Security
                     AuditDisablePredictableIds(),
                     AuditPasswordRegularExpression(),
                     AuditSecurityRoleMemberships( rockContext ),
+                    AuditSqlInjectionContent( rockContext ),
                     AuditBinaryFileTypeSecurity( rockContext ),
                     AuditDocumentTypeSecurity( rockContext )
                 };
@@ -225,6 +226,61 @@ namespace net.redeemertech.Security
                     ignoredDocumentTypeGuids.Count ),
                 Details = details.ToString(),
                 InsecureDocumentTypes = insecureDocumentTypes
+            };
+        }
+
+        private AuditCheckResult AuditSqlInjectionContent( RockContext rockContext )
+        {
+            var findings = new List<SqlInjectionContentFinding>();
+
+            findings.AddRange(
+                rockContext.Database.SqlQuery<int>( @"
+                    SELECT [Id]
+                    FROM [Person]
+                    WHERE [LastName] LIKE '%<script%'
+                    OR [FirstName] LIKE '%<script%'
+                    OR [NickName] LIKE '%<script%'" )
+                    .ToList()
+                    .Select( id => new SqlInjectionContentFinding
+                    {
+                        TableName = "Person",
+                        Id = id
+                    } ) );
+
+            findings.AddRange(
+                rockContext.Database.SqlQuery<int>( @"
+                    SELECT [Id]
+                    FROM [Location]
+                    WHERE [Street1] LIKE '%<script%'
+                    OR [Street2] LIKE '%<script%'
+                    OR [City] LIKE '%<script%'
+                    OR [PostalCode] LIKE '%<script%'" )
+                    .ToList()
+                    .Select( id => new SqlInjectionContentFinding
+                    {
+                        TableName = "Location",
+                        Id = id
+                    } ) );
+
+            var details = new StringBuilder();
+            foreach ( var findingGroup in findings.GroupBy( f => f.TableName ).OrderBy( g => g.Key ) )
+            {
+                details.AppendFormat(
+                    "{0} rows containing '<script': {1}.",
+                    findingGroup.Key,
+                    string.Join( ", ", findingGroup.OrderBy( f => f.Id ).Select( f => f.Id ) ) );
+                details.AppendLine();
+            }
+
+            return new AuditCheckResult
+            {
+                Name = "SQL Injection Content",
+                IsPassing = !findings.Any(),
+                Summary = findings.Any()
+                    ? string.Format( "SQL Injection Content: {0} Person or Location rows contain '<script'.", findings.Count )
+                    : "SQL Injection Content: no Person or Location rows contain '<script'.",
+                Details = details.ToString(),
+                SqlInjectionContentFindings = findings
             };
         }
 
@@ -671,6 +727,10 @@ namespace net.redeemertech.Security
                     {
                         html.Append( BuildSecurityRoleMembershipDetailsHtml( checkResult.RoleMembershipChanges, checkResult.Details ) );
                     }
+                    else if ( checkResult.Name == "SQL Injection Content" )
+                    {
+                        html.Append( BuildSqlInjectionContentDetailsHtml( checkResult.SqlInjectionContentFindings ) );
+                    }
                     else if ( checkResult.Details.IsNotNullOrWhiteSpace() )
                     {
                         html.AppendFormat( "<p>{0}</p>", HttpUtility.HtmlEncode( checkResult.Details ) );
@@ -793,6 +853,29 @@ namespace net.redeemertech.Security
             return html.ToString();
         }
 
+        private string BuildSqlInjectionContentDetailsHtml( List<SqlInjectionContentFinding> findings )
+        {
+            if ( findings == null || !findings.Any() )
+            {
+                return "<p>No Person or Location rows containing '&lt;script' were found.</p>";
+            }
+
+            var html = new StringBuilder();
+            html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;'>" );
+            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Table</th><th align='right' style='border-bottom:1px solid #ddd;'>Id</th></tr></thead><tbody>" );
+
+            foreach ( var finding in findings.OrderBy( f => f.TableName ).ThenBy( f => f.Id ) )
+            {
+                html.AppendFormat(
+                    "<tr><td style='border-bottom:1px solid #eee;'>{0}</td><td align='right' style='border-bottom:1px solid #eee;'>{1}</td></tr>",
+                    HttpUtility.HtmlEncode( finding.TableName ),
+                    finding.Id );
+            }
+
+            html.Append( "</tbody></table>" );
+            return html.ToString();
+        }
+
         private class AuditCheckResult
         {
             public string Name { get; set; }
@@ -808,6 +891,8 @@ namespace net.redeemertech.Security
             public List<DocumentTypeAuditResult> InsecureDocumentTypes { get; set; }
 
             public List<RoleMembershipChange> RoleMembershipChanges { get; set; }
+
+            public List<SqlInjectionContentFinding> SqlInjectionContentFindings { get; set; }
 
             public List<string> SecurityNotices { get; set; }
         }
@@ -841,6 +926,13 @@ namespace net.redeemertech.Security
             public string PersonName { get; set; }
 
             public string PersonGuid { get; set; }
+        }
+
+        private class SqlInjectionContentFinding
+        {
+            public string TableName { get; set; }
+
+            public int Id { get; set; }
         }
 
         private class FileTypeAuditResult

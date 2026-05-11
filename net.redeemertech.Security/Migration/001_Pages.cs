@@ -169,19 +169,19 @@ namespace net.redeemertech.Security.Migrations
             // update block order for pages with new blocks if the page,zone has multiple blocks
 
             // Update Order for Page: IIS Analytics,  Zone: Main,  Block: All Requests
-            Sql(@"UPDATE [Block] SET [Order] = 0 WHERE [Guid] = '411FACDE-72BF-4670-835C-1350291BAE38'");
+            Sql(@"UPDATE [Block] SET [Order] = 0, [CssClass] = 'col-md-12' WHERE [Guid] = '411FACDE-72BF-4670-835C-1350291BAE38'");
 
             // Update Order for Page: IIS Analytics,  Zone: Main,  Block: Data Egress
-            Sql(@"UPDATE [Block] SET [Order] = 2 WHERE [Guid] = 'DB4EDD2D-D3B9-4349-9F3A-69ADD8FCC403'");
+            Sql(@"UPDATE [Block] SET [Order] = 2, [CssClass] = 'col-md-6' WHERE [Guid] = 'DB4EDD2D-D3B9-4349-9F3A-69ADD8FCC403'");
 
             // Update Order for Page: IIS Analytics,  Zone: Main,  Block: Top URLs
-            Sql(@"UPDATE [Block] SET [Order] = 4 WHERE [Guid] = '061D2970-370E-4FF0-A8DF-392FA7B2126F'");
+            Sql(@"UPDATE [Block] SET [Order] = 4, [CssClass] = 'col-md-6' WHERE [Guid] = '061D2970-370E-4FF0-A8DF-392FA7B2126F'");
 
             // Update Order for Page: IIS Analytics,  Zone: Main,  Block: Top users
-            Sql(@"UPDATE [Block] SET [Order] = 3 WHERE [Guid] = '679B1693-3A8C-4209-BE43-EFD0B30E3948'");
+            Sql(@"UPDATE [Block] SET [Order] = 3, [CssClass] = 'col-md-6' WHERE [Guid] = '679B1693-3A8C-4209-BE43-EFD0B30E3948'");
 
             // Update Order for Page: IIS Analytics,  Zone: Main,  Block: Users
-            Sql(@"UPDATE [Block] SET [Order] = 1 WHERE [Guid] = 'A7BBF719-610C-4FF0-AEC8-68D740BDCAA3'");
+            Sql(@"UPDATE [Block] SET [Order] = 1, [CssClass] = 'col-md-6' WHERE [Guid] = 'A7BBF719-610C-4FF0-AEC8-68D740BDCAA3'");
 
             // Update Order for Page: IIS Analytics,  Zone: Sidebar1,  Block: Page Menu
             Sql(@"UPDATE [Block] SET [Order] = 0 WHERE [Guid] = '0A281859-4CFF-4A93-B802-87AA96230AF7'");
@@ -1006,7 +1006,7 @@ ORDER BY requests DESC");
                 renderChart();
             } else {
                 var script = document.createElement('script');
-                script.src = '/Scripts/Chartjs/Chart.min.js';
+                script.src = '/Plugins/net_redeemertech/Security/chart.umd.min.js';
                 script.onload = function() {
                     renderChart();
                 };
@@ -1133,6 +1133,12 @@ ORDER BY log_date ASC;");
     <div class=""card mt-4 mb-4"">
         <div class=""card-body"">
             <h3 class=""card-title"">Data Egress (Last 7 Days)</h3>
+
+            <!-- Hidden by default, will show if all data is 0 -->
+            <div id=""noEgressDataMessage"" class=""alert alert-warning mt-3"" style=""display: none;"">
+                Please enable the sc-bytes column in your IIS logs to view egress data.
+            </div>
+
             <canvas id=""dataEgressChart"" style=""width: 100%; max-height: 400px;""></canvas>
         </div>
     </div>
@@ -1154,9 +1160,21 @@ ORDER BY log_date ASC;");
                 var chartData = [
                     {% for row in rows %}
                         // Convert raw bytes to Megabytes (MB)
-                        ({{ row['total_bytes_sent'] | default: 0 }} / 1048576).toFixed(2){% if forloop.last == false %},{% endif %}
+                        ({{ row['total_bytes_sent'] | Default: 0 }} / 1048576).toFixed(2){% if forloop.last == false %},{% endif %}
                     {% endfor %}
                 ];
+
+                // Check if all amounts in the chart data are zero
+                var allZeros = chartData.every(function(val) {
+                    return parseFloat(val) === 0;
+                });
+
+                // Display warning and stop rendering if no data exists
+                if (allZeros) {
+                    canvas.style.display = 'none';
+                    document.getElementById('noEgressDataMessage').style.display = 'block';
+                    return; 
+                }
 
                 new Chart(ctx, {
                     type: 'line',
@@ -1198,7 +1216,7 @@ ORDER BY log_date ASC;");
                 renderChart();
             } else {
                 var script = document.createElement('script');
-                script.src = '/Scripts/Chartjs/Chart.min.js';
+                script.src = '/Plugins/net_redeemertech/Security/chart.umd.min.js';
                 script.onload = function() {
                     renderChart();
                 };
@@ -1269,13 +1287,13 @@ ORDER BY log_date ASC;");
                 
                 var uniqueIpsData = [
                     {% for row in rows %}
-                        {{ row['unique_ips'] | default: 0 }}{% if forloop.last == false %},{% endif %}
+                        {{ row['unique_ips'] | Default: 0 }}{% if forloop.last == false %},{% endif %}
                     {% endfor %}
                 ];
 
                 var uniqueUsernamesData = [
                     {% for row in rows %}
-                        {{ row['unique_usernames'] | default: 0 }}{% if forloop.last == false %},{% endif %}
+                        {{ row['unique_usernames'] | Default: 0 }}{% if forloop.last == false %},{% endif %}
                     {% endfor %}
                 ];
 
@@ -1353,7 +1371,7 @@ ORDER BY log_date ASC;");
                 renderChart();
             } else {
                 var script = document.createElement('script');
-                script.src = '/Scripts/Chartjs/Chart.min.js';
+                script.src = '/Plugins/net_redeemertech/Security/chart.umd.min.js';
                 script.onload = function() {
                     renderChart();
                 };
@@ -1605,7 +1623,7 @@ LIMIT 5");
                     <thead>
                         <tr>
                             {{% for column in columns %}}
-                                <th>{{ column }}</th>
+                                <th>{{{{ column }}}}</th>
                             {{% endfor %}}
                         </tr>
                     </thead>
@@ -1614,9 +1632,9 @@ LIMIT 5");
                             <tr>
                                 {{% for column in columns %}}
                                     {{% if column == ""user"" %}}
-                                    <td><a href=""/page/{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '02526A81-81BB-4BFC-A375-B184E521501E'")}?user={{ row[column] | Escape }}"">{{ row[column] | Escape }}</a></td>
+                                    <td><a href=""/page/{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '02526A81-81BB-4BFC-A375-B184E521501E'")}?user={{{{ row[column] | UrlEncode }}}}"">{{{{ row[column] | Escape }}}}</a></td>
                                     {{% else %}}
-                                    <td>{{ row[column] | Escape }}</td>
+                                    <td>{{{{ row[column] | Escape }}}}</td>
                                     {{% endif %}}
                                 {{% endfor %}}
                             </tr>
@@ -1667,7 +1685,7 @@ LIMIT 5");
                     <thead>
                         <tr>
                             {{% for column in columns %}}
-                                <th>{{ column }}</th>
+                                <th>{{{{ column }}}}</th>
                             {{% endfor %}}
                         </tr>
                     </thead>
@@ -1676,9 +1694,9 @@ LIMIT 5");
                             <tr>
                                 {{% for column in columns %}}
                                     {{% if column == ""cs_uri_stem"" %}}
-                                    <td><a href=""{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '388ABED2-C9CA-4A59-9843-FC84A55D8295'")}?page={{ row[column] | Escape }}"">{{ row[column] | Escape }}</a></td>
+                                    <td><a href=""{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '388ABED2-C9CA-4A59-9843-FC84A55D8295'")}?page={{{{ row[column] | UrlEncode }}}}"">{{{{ row[column] | Escape }}}}</a></td>
                                     {{% else %}}
-                                    <td>{{ row[column] | Escape }}</td>
+                                    <td>{{{{ row[column] | Escape }}}}</td>
                                     {{% endif %}}
                                 {{% endfor %}}
                             </tr>

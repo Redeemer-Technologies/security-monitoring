@@ -231,13 +231,12 @@ namespace net.redeemertech.Security
         private AuditCheckResult AuditSecurityPluginVersion()
         {
             var rockVersion = Rock.VersionInfo.VersionInfo.GetRockSemanticVersionNumber();
-            var organizationEmail = GlobalAttributesCache.Value( Rock.SystemKey.GlobalAttributeKey.ORGANIZATION_EMAIL );
             var details = new StringBuilder();
             var notices = new List<string>();
 
             try
             {
-                var versionsJson = DownloadSecurityPluginVersionsJson( organizationEmail );
+                var versionsJson = DownloadSecurityPluginVersionsJson( );
                 var serializer = new JavaScriptSerializer();
                 var versionData = serializer.DeserializeObject( versionsJson ) as Dictionary<string, object>;
 
@@ -296,9 +295,9 @@ namespace net.redeemertech.Security
             }
         }
 
-        private string DownloadSecurityPluginVersionsJson( string organizationEmail )
+        private string DownloadSecurityPluginVersionsJson( )
         {
-            var url = string.Format( "{0}?org_email={1}", SecurityPluginVersionsUrl, HttpUtility.UrlEncode( organizationEmail ?? string.Empty ) );
+            var url = string.Format( "{0}", SecurityPluginVersionsUrl );
             var request = ( System.Net.HttpWebRequest )System.Net.WebRequest.Create( url );
             request.Method = "GET";
             request.Timeout = 3000;
@@ -618,7 +617,6 @@ namespace net.redeemertech.Security
             }
 
             var emailMessage = new RockEmailMessage();
-            emailMessage.FromEmail = GlobalAttributesCache.Value( Rock.SystemKey.GlobalAttributeKey.ORGANIZATION_EMAIL );
             emailMessage.Subject = checkResults.All( c => c.IsPassing ) ? "Security Audit: Passed" : "Security Audit: Failed";
             emailMessage.Message = BuildHtmlMessage( checkResults, passingCheckCount );
             emailMessage.PlainTextMessage = Result;

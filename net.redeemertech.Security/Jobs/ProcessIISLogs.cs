@@ -30,7 +30,7 @@ namespace net.redeemertech.Security
     [TextField( "Parquet Folder",
         "The folder where parquet files and processing state should be stored. Relative paths are stored under App_Data.",
         true,
-        "IisLogParquet",
+        "IISLogParquet",
         key: AttributeKey.ParquetFolder,
         order: 1 )]
     [IntegerField( "Retain Parquet Files For Days",

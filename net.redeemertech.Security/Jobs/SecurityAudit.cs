@@ -34,6 +34,11 @@ namespace net.redeemertech.Security
         key: AttributeKey.DocumentTypesToIgnore,
         order: 1,
         AllowMultiple = true )]
+    [TextField( "Results Email Addresses",
+        "A comma-delimited list of email addresses that should receive the formatted security audit results. Leave the standard job notification status set to None to avoid duplicate built-in job notification emails.",
+        false,
+        key: AttributeKey.ResultsEmailAddresses,
+        order: 2 )]
     [DisallowConcurrentExecution]
     public class SecurityAudit : RockJob
     {
@@ -54,6 +59,8 @@ namespace net.redeemertech.Security
             public const string BinaryFileTypesToIgnore = "BinaryFileTypesToIgnore";
 
             public const string DocumentTypesToIgnore = "DocumentTypesToIgnore";
+
+            public const string ResultsEmailAddresses = "ResultsEmailAddresses";
         }
 
         public override void Execute()
@@ -99,10 +106,10 @@ namespace net.redeemertech.Security
 
                 this.Result = jobResult.ToString();
 
-                var notificationEmails = ServiceJob?.NotificationEmails;
-                if ( notificationEmails.IsNotNullOrWhiteSpace() )
+                var resultsEmailAddresses = GetAttributeValue( AttributeKey.ResultsEmailAddresses );
+                if ( resultsEmailAddresses.IsNotNullOrWhiteSpace() )
                 {
-                    SendResultsEmail( notificationEmails, checkResults, passingCheckCount );
+                    SendResultsEmail( resultsEmailAddresses, checkResults, passingCheckCount );
                 }
             }
         }

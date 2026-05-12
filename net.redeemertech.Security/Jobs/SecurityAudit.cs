@@ -336,7 +336,13 @@ namespace net.redeemertech.Security
                     FROM [Person]
                     WHERE [LastName] LIKE '%<script%'
                     OR [FirstName] LIKE '%<script%'
-                    OR [NickName] LIKE '%<script%'" )
+                    OR [NickName] LIKE '%<script%'
+                    OR [LastName] LIKE '%{%'
+                    OR [FirstName] LIKE '%{%'
+                    OR [NickName] LIKE '%{%'
+                    OR [LastName] LIKE '%}%'
+                    OR [FirstName] LIKE '%}%'
+                    OR [NickName] LIKE '%}%' " )
                     .ToList()
                     .Select( id => new SqlInjectionContentFinding
                     {

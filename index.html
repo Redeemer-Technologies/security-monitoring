@@ -120,7 +120,7 @@
                         </div>
                         <dl class="release-meta">
                             <dt>Plugin version</dt>
-                            <dd><code>17.0.0.0</code></dd>
+                            <dd><code>17.0.0.1</code></dd>
                             <dt>Release date</dt>
                             <dd>May 11, 2026</dd>
                         </dl>
@@ -299,6 +299,9 @@ LIMIT 100</code></pre>
                 <h4 id="check-password-regex">Password Regular Expression</h4>
                 <p>Reads the <code>PasswordRegularExpression</code> global attribute. The check fails when the value is
                     blank or still set to Rock's default of <code>\w{6,255}</code>, which is far too weak for secure passwords.</p>
+                
+                <h4 id="check-workflow-groups">Workflow group memberships</h4>
+                <p>Checks Group Member Add actions in workflows to ensure any public workflows guard against permissions escalation attacks.</p>
 
                 <h4 id="check-injection">Injection-style content</h4>
                 <p>Searches Person and Location fields for values containing potential injection-style content. Matches do not
@@ -327,6 +330,11 @@ LIMIT 100</code></pre>
                         <dd>Comma-delimited list of document type names or Guids to exclude from the document type
                             check.</dd>
                     </div>
+                    <div>
+                        <dt><code>Results Email Addresses</code><span class="type">Email address list, optional</span></dt>
+                        <dd>Comma-delimited list of email addresses to receive the audit results.</dd>
+                    </div>
+                    
                 </dl>
             </section>
 

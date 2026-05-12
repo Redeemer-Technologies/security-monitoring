@@ -22,7 +22,7 @@ using Rock.Web.Cache;
 namespace net.redeemertech.Security
 {
     [DisplayName( "Security Audit" )]
-    [Description( "Audits Rock security settings, security role membership, binary file type view permissions, and document type view permissions." )]
+    [Description( "Audits Rock security settings, security role membership, binary file type view permissions, document type view permissions, and workflow type view permissions." )]
     [BinaryFileTypesField( "Binary File Types To Ignore",
         "A whitelist of binary file types that should be open to the public and should not be included in this audit.",
         false,
@@ -68,7 +68,8 @@ namespace net.redeemertech.Security
                     AuditSecurityRoleMemberships( rockContext ),
                     AuditSqlInjectionContent( rockContext ),
                     AuditBinaryFileTypeSecurity( rockContext ),
-                    AuditDocumentTypeSecurity( rockContext )
+                    AuditDocumentTypeSecurity( rockContext ),
+                    AuditAddPersonToGroupWorkflowSecurity( rockContext )
                 };
 
                 var passingCheckCount = checkResults.Count( c => c.IsPassing );
@@ -234,6 +235,87 @@ namespace net.redeemertech.Security
                     ignoredDocumentTypeGuids.Count ),
                 Details = details.ToString(),
                 InsecureDocumentTypes = insecureDocumentTypes
+            };
+        }
+
+        private AuditCheckResult AuditAddPersonToGroupWorkflowSecurity( RockContext rockContext )
+        {
+            var workflowTypeIds = rockContext.Database.SqlQuery<int>( @"
+                WITH Attributes AS (
+                    SELECT
+                        [Id],
+                        [Name],
+                        [Key]
+                    FROM [Attribute]
+                    WHERE EntityTypeId = (SELECT [Id] FROM [EntityType] WHERE [Name] = 'Rock.Model.WorkflowActionType')
+                    AND EntityTypeQualifierColumn = 'EntityTypeId'
+                    AND EntityTypeQualifierValue = (SELECT CONVERT(VARCHAR(10), [Id]) FROM [EntityType] WHERE [Name] = 'Rock.Workflow.Action.AddPersonToGroupWFAttribute')
+                )
+                SELECT DISTINCT
+                    [WorkflowType].[Id] [WorkflowTypeId]
+                FROM WorkflowActionType
+                INNER JOIN WorkflowActivityType ON WorkflowActivityType.Id = WorkflowActionType.ActivityTypeId
+                INNER JOIN WorkflowType ON WorkflowType.Id = WorkflowActivityType.WorkflowTypeId
+                LEFT JOIN [Attributes] [DisableSecurityGroupsAtt] ON [DisableSecurityGroupsAtt].[Key] = 'DisableSecurityGroups'
+                LEFT JOIN [Attributes] [LimitToGroupsOfTypeAtt] ON [LimitToGroupsOfTypeAtt].[Key] = 'LimitToGroupsOfType'
+                LEFT JOIN [Attributes] [LimitToGroupsUnderSpecificParentGroupAtt] ON [LimitToGroupsUnderSpecificParentGroupAtt].[Key] = 'LimitToGroupsUnderSpecificParentGroup'
+                LEFT JOIN [AttributeValue] [DisableSecurityGroupsVal] ON [DisableSecurityGroupsVal].AttributeId = [DisableSecurityGroupsAtt].Id AND [DisableSecurityGroupsVal].EntityId = WorkflowActionType.Id
+                LEFT JOIN [AttributeValue] [LimitToGroupsOfTypeVal] ON [LimitToGroupsOfTypeVal].AttributeId = [LimitToGroupsOfTypeAtt].Id AND [LimitToGroupsOfTypeVal].EntityId = WorkflowActionType.Id
+                LEFT JOIN [AttributeValue] [LimitToGroupsUnderSpecificParentGroupVal] ON [LimitToGroupsUnderSpecificParentGroupVal].AttributeId = [LimitToGroupsUnderSpecificParentGroupAtt].Id AND [LimitToGroupsUnderSpecificParentGroupVal].EntityId = WorkflowActionType.Id
+                WHERE WorkflowActionType.EntityTypeId = (SELECT [Id] FROM [EntityType] WHERE [Name] = 'Rock.Workflow.Action.AddPersonToGroupWFAttribute')
+                AND (
+                    DisableSecurityGroupsVal.[Value] IS NULL
+                    OR
+                    DisableSecurityGroupsVal.[Value] = 'False'
+                )
+                AND TRY_CONVERT(uniqueidentifier, LimitToGroupsOfTypeVal.[Value]) IS NULL
+                AND TRY_CONVERT(uniqueidentifier, [LimitToGroupsUnderSpecificParentGroupVal].[Value]) IS NULL
+                ORDER BY WorkflowType.Id ASC" )
+                .ToList();
+
+            var workflowTypeAuditResults = new WorkflowTypeService( rockContext ).Queryable()
+                .Where( w => workflowTypeIds.Contains( w.Id ) )
+                .OrderBy( w => w.Name )
+                .ToList()
+                .Select( w => new WorkflowTypeAuditResult
+                {
+                    Id = w.Id,
+                    Guid = w.Guid.ToString(),
+                    Name = w.Name,
+                    AllowsAllUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllUsers ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers )
+                } )
+                .ToList();
+
+            var insecureWorkflowTypes = workflowTypeAuditResults
+                .Where( w => !w.IsSecure )
+                .ToList();
+
+            var secureWorkflowTypeCount = workflowTypeAuditResults.Count - insecureWorkflowTypes.Count;
+            var details = new StringBuilder();
+
+            foreach ( var workflowType in insecureWorkflowTypes )
+            {
+                details.AppendLine();
+                details.AppendFormat(
+                    "{0} (Id: {1}, Guid: {2}) is not secure. Reasons: {3}.",
+                    workflowType.Name,
+                    workflowType.Id,
+                    workflowType.Guid,
+                    string.Join( "; ", workflowType.Reasons ) );
+            }
+
+            return new AuditCheckResult
+            {
+                Name = "Add Person To Group Workflow Security",
+                IsPassing = !insecureWorkflowTypes.Any(),
+                Summary = string.Format(
+                    "Add Person To Group Workflow Security: {0} of {1} checked workflow types are secure. {2} workflow types allow All Users or All Authenticated Users to run the workflow.",
+                    secureWorkflowTypeCount,
+                    workflowTypeAuditResults.Count,
+                    insecureWorkflowTypes.Count ),
+                Details = details.ToString(),
+                InsecureWorkflowTypes = insecureWorkflowTypes
             };
         }
 
@@ -731,6 +813,10 @@ namespace net.redeemertech.Security
                     {
                         html.Append( BuildDocumentTypeDetailsHtml( checkResult.InsecureDocumentTypes ) );
                     }
+                    else if ( checkResult.Name == "Add Person To Group Workflow Security" )
+                    {
+                        html.Append( BuildWorkflowTypeDetailsHtml( checkResult.InsecureWorkflowTypes ) );
+                    }
                     else if ( checkResult.Name == "Security Role Memberships" )
                     {
                         html.Append( BuildSecurityRoleMembershipDetailsHtml( checkResult.RoleMembershipChanges, checkResult.Details ) );
@@ -834,6 +920,30 @@ namespace net.redeemertech.Security
             return html.ToString();
         }
 
+        private string BuildWorkflowTypeDetailsHtml( List<WorkflowTypeAuditResult> insecureWorkflowTypes )
+        {
+            if ( insecureWorkflowTypes == null || !insecureWorkflowTypes.Any() )
+            {
+                return "<p>No insecure workflow types were found.</p>";
+            }
+
+            var html = new StringBuilder();
+            html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;'>" );
+            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Workflow Type</th><th align='left' style='border-bottom:1px solid #ddd;'>Reasons</th><th align='left' style='border-bottom:1px solid #ddd;'>Guid</th></tr></thead><tbody>" );
+
+            foreach ( var workflowType in insecureWorkflowTypes )
+            {
+                html.AppendFormat(
+                    "<tr><td style='border-bottom:1px solid #eee;'>{0}</td><td style='border-bottom:1px solid #eee;'>{1}</td><td style='border-bottom:1px solid #eee;'>{2}</td></tr>",
+                    HttpUtility.HtmlEncode( workflowType.Name ),
+                    HttpUtility.HtmlEncode( string.Join( "; ", workflowType.Reasons ) ),
+                    HttpUtility.HtmlEncode( workflowType.Guid ) );
+            }
+
+            html.Append( "</tbody></table>" );
+            return html.ToString();
+        }
+
         private string BuildSecurityRoleMembershipDetailsHtml( List<RoleMembershipChange> roleMembershipChanges, string details )
         {
             if ( roleMembershipChanges == null || !roleMembershipChanges.Any() )
@@ -897,6 +1007,8 @@ namespace net.redeemertech.Security
             public List<FileTypeAuditResult> InsecureFileTypes { get; set; }
 
             public List<DocumentTypeAuditResult> InsecureDocumentTypes { get; set; }
+
+            public List<WorkflowTypeAuditResult> InsecureWorkflowTypes { get; set; }
 
             public List<RoleMembershipChange> RoleMembershipChanges { get; set; }
 
@@ -1011,6 +1123,43 @@ namespace net.redeemertech.Security
                     if ( AllowsPublicView )
                     {
                         yield return "View is allowed to the public";
+                    }
+                }
+            }
+        }
+
+        private class WorkflowTypeAuditResult
+        {
+            public int Id { get; set; }
+
+            public string Guid { get; set; }
+
+            public string Name { get; set; }
+
+            public bool AllowsAllUsersView { get; set; }
+
+            public bool AllowsAllAuthenticatedUsersView { get; set; }
+
+            public bool IsSecure
+            {
+                get
+                {
+                    return !AllowsAllUsersView && !AllowsAllAuthenticatedUsersView;
+                }
+            }
+
+            public IEnumerable<string> Reasons
+            {
+                get
+                {
+                    if ( AllowsAllUsersView )
+                    {
+                        yield return "View is allowed to All Users";
+                    }
+
+                    if ( AllowsAllAuthenticatedUsersView )
+                    {
+                        yield return "View is allowed to All Authenticated Users";
                     }
                 }
             }

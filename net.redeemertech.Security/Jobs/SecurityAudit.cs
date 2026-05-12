@@ -17,6 +17,7 @@ using Rock.Data;
 using Rock.Jobs;
 using Rock.Model;
 using Rock.Security;
+using Rock.Utility.Enums;
 using Rock.Web.Cache;
 
 namespace net.redeemertech.Security
@@ -71,6 +72,7 @@ namespace net.redeemertech.Security
                 {
                     AuditSecurityPluginVersion(),
                     AuditDisablePredictableIds(),
+                    AuditAccountProtectionProfileSettings( rockContext ),
                     AuditPasswordRegularExpression(),
                     AuditSecurityRoleMemberships( rockContext ),
                     AuditSqlInjectionContent( rockContext ),
@@ -567,6 +569,44 @@ namespace net.redeemertech.Security
                 Details = isWeakDefault || isMissing
                     ? "Update the Password Regular Expression global attribute to enforce a stronger password policy."
                     : string.Empty
+            };
+        }
+
+        private AuditCheckResult AuditAccountProtectionProfileSettings( RockContext rockContext )
+        {
+            var securitySettings = new SecuritySettingsService().SecuritySettings;
+            var disablesTokensForExtremeProfile = securitySettings?.DisableTokensForAccountProtectionProfiles?.Contains( AccountProtectionProfile.Extreme ) == true;
+
+            var administratorsGroup = new GroupService( rockContext ).Get( Rock.SystemGuid.Group.GROUP_ADMINISTRATORS.AsGuid() );
+            var administratorsGroupHasExtremeProtectionProfile = administratorsGroup?.ElevatedSecurityLevel == ElevatedSecurityLevel.Extreme;
+
+            var details = new StringBuilder();
+
+            if ( !disablesTokensForExtremeProfile )
+            {
+                details.AppendLine( "Enable 'Disable Usage of Personal Tokens' for the Extreme account protection profile in Rock security settings." );
+            }
+
+            if ( administratorsGroup == null )
+            {
+                details.AppendLine( "The built-in Rock Administrators role could not be found." );
+            }
+            else if ( !administratorsGroupHasExtremeProtectionProfile )
+            {
+                details.AppendFormat(
+                    "Set the Rock Administrators role (RSR - Rock Administration, Guid: {0}) protection profile to Extreme. Current value: {1}.",
+                    Rock.SystemGuid.Group.GROUP_ADMINISTRATORS,
+                    administratorsGroup.ElevatedSecurityLevel );
+            }
+
+            return new AuditCheckResult
+            {
+                Name = "Account Protection Profile Settings",
+                IsPassing = disablesTokensForExtremeProfile && administratorsGroupHasExtremeProtectionProfile,
+                Summary = disablesTokensForExtremeProfile && administratorsGroupHasExtremeProtectionProfile
+                    ? "Account Protection Profile Settings: Extreme personal tokens are disabled and Rock Administrators has the Extreme protection profile."
+                    : "Account Protection Profile Settings: Extreme personal tokens are not disabled or Rock Administrators does not have the Extreme protection profile.",
+                Details = details.ToString()
             };
         }
 

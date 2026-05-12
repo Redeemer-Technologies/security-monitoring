@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -36,10 +37,17 @@ namespace net.redeemertech.Security
     [DisallowConcurrentExecution]
     public class SecurityAudit : RockJob
     {
-        private const string SecurityPluginVersion = "17.0.0.0";
         private const string SecurityPluginVersionsUrl = "https://security.redeemertech.com/security-plugin-versions.json";
         private const string SecurityRoleMembershipSnapshotSystemSettingKey = "net.redeemertech.SecurityAudit.SecurityRoleMembershipSnapshot";
         private const string SecurityRoleMembershipSnapshotSystemSettingGuid = "08e7a104-f535-4403-a73e-240cdf8daf49";
+
+        private static string SecurityPluginVersion
+        {
+            get
+            {
+                return FileVersionInfo.GetVersionInfo( typeof( SecurityAudit ).Assembly.Location ).FileVersion;
+            }
+        }
 
         private class AttributeKey
         {

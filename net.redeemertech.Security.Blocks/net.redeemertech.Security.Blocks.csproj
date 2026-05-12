@@ -122,4 +122,9 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="PackageDistribution" AfterTargets="Build" Condition=" '$(Configuration)' == 'Release' ">
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\net.redeemertech.Security\net.redeemertech.Security.csproj" Targets="Build" Properties="Configuration=$(Configuration);Platform=$(Platform)" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\net.redeemertech.Security.Javascript" Command="npm run build" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Build\PackageDistribution.ps1&quot; -RootDir &quot;$(MSBuildProjectDirectory)\..&quot; -OutputDir &quot;$(TargetDir).&quot; -ConfigurationName &quot;$(Configuration)&quot; -PlatformName &quot;$(Platform)&quot;" />
+  </Target>
 </Project>

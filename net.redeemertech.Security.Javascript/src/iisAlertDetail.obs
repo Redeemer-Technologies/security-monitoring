@@ -9,6 +9,8 @@
                     <dt>Active</dt><dd>{{ alert.isActive ? 'Yes' : 'No' }}</dd>
                     <dt>Email Addresses</dt><dd>{{ alert.notificationEmails || '' }}</dd>
                     <dt>Evaluate Every</dt><dd>{{ alert.evaluationFrequencyMinutes }} minute(s)</dd>
+                    <dt>Block IP Addresses</dt><dd>{{ alert.blockIpAddress ? `Yes, for ${alert.blockIpAddressMinutes || 60} minute(s)` : 'No' }}</dd>
+                    <dt>Lock Out User Accounts</dt><dd>{{ alert.lockOutUserAccounts ? 'Yes' : 'No' }}</dd>
                     <dt>Last Run</dt><dd>{{ alert.lastRunDateTime || 'Never' }}</dd>
                 </dl>
 
@@ -37,6 +39,11 @@
                 <TextBox v-model="alert.notificationEmails" label="Email Addresses" help="Comma-separated list of email addresses to notify when this alert trips." />
                 <NumberBox v-model="alert.evaluationFrequencyMinutes" label="Evaluate Every Minutes" :minimumValue="1" />
 
+                <h4>Response Actions</h4>
+                <CheckBox v-model="alert.blockIpAddress" label="Block IP Addresses" help="When enabled, the alert query must return a BlockedIpAddress column. The c-ip column is also accepted." />
+                <NumberBox v-if="alert.blockIpAddress" v-model="alert.blockIpAddressMinutes" label="Block IP for Minutes" :minimumValue="1" />
+                <CheckBox v-model="alert.lockOutUserAccounts" label="Lock Out User Accounts" help="When enabled, the alert query must return a UserLoginId, UserName, or cs-username column." />
+
                 <RockButton btnType="primary" :disabled="isSaving" @click="save">Save</RockButton>
                 <RockButton v-if="savedAlert" :disabled="isSaving" @click="cancel">Cancel</RockButton>
             </template>
@@ -61,7 +68,7 @@
 
     const config = useConfigurationValues<IisAlertsInitializationBag>();
     const invokeBlockAction = useInvokeBlockAction();
-    const alert = ref<IisAlertBag>(config.alert || { isActive: true, evaluationFrequencyMinutes: 60, dateRange: config.defaultDateRange });
+    const alert = ref<IisAlertBag>(config.alert || { isActive: true, evaluationFrequencyMinutes: 60, dateRange: config.defaultDateRange, blockIpAddress: false, blockIpAddressMinutes: 60, lockOutUserAccounts: false });
     const savedAlert = ref<IisAlertBag | null>(alert.value.idKey ? { ...alert.value } : null);
     const errorMessage = ref(config.errorMessage ?? "");
     const isEditable = config.isEditable;

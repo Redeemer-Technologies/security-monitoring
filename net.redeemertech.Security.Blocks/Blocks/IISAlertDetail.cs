@@ -64,6 +64,9 @@ namespace net.redeemertech.Security.Blocks.Blocks
             alert.DateRange = IISLogDuckDbQuery.ToDelimitedDateRange(bag.DateRange).IfEmpty(IISLogDuckDbQuery.DefaultDateRange);
             alert.NotificationEmails = bag.NotificationEmails;
             alert.EvaluationFrequencyMinutes = bag.EvaluationFrequencyMinutes < 1 ? 1 : bag.EvaluationFrequencyMinutes;
+            alert.BlockIpAddress = bag.BlockIpAddress;
+            alert.BlockIpAddressMinutes = bag.BlockIpAddress ? System.Math.Max( 1, bag.BlockIpAddressMinutes ?? 60 ) : ( int? ) null;
+            alert.LockOutUserAccounts = bag.LockOutUserAccounts;
             if (alert.Name.IsNullOrWhiteSpace() || alert.Query.IsNullOrWhiteSpace())
             {
                 return ActionBadRequest("Name and SQL query are required.");
@@ -85,7 +88,8 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 Query = DefaultQuery,
                 SummaryLava = DefaultSummaryLava,
                 DateRange = IISLogDuckDbQuery.DefaultDateRange,
-                EvaluationFrequencyMinutes = 60
+                EvaluationFrequencyMinutes = 60,
+                BlockIpAddressMinutes = 60
             };
         }
 

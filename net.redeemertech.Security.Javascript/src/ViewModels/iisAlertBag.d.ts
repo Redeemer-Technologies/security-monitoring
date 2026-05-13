@@ -11,4 +11,7 @@ export type IisAlertBag = {
     notificationEmails?: string | null;
     evaluationFrequencyMinutes: number;
     lastRunDateTime?: string | null;
+    blockIpAddress: boolean;
+    blockIpAddressMinutes?: number | null;
+    lockOutUserAccounts: boolean;
 };

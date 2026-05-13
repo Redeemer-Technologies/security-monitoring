@@ -16,6 +16,9 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public string NotificationEmails { get; set; }
         public int EvaluationFrequencyMinutes { get; set; }
         public string LastRunDateTime { get; set; }
+        public bool BlockIpAddress { get; set; }
+        public int? BlockIpAddressMinutes { get; set; }
+        public bool LockOutUserAccounts { get; set; }
 
         public static IISAlertBag FromEntity(IISAlert alert)
         {
@@ -30,7 +33,10 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 DateRange = IISLogDuckDbQuery.ToSlidingDateRangeBag(alert.DateRange.IfEmpty(IISLogDuckDbQuery.DefaultDateRange)),
                 NotificationEmails = alert.NotificationEmails,
                 EvaluationFrequencyMinutes = alert.EvaluationFrequencyMinutes < 1 ? 60 : alert.EvaluationFrequencyMinutes,
-                LastRunDateTime = alert.LastRunDateTime?.ToString("g")
+                LastRunDateTime = alert.LastRunDateTime?.ToString("g"),
+                BlockIpAddress = alert.BlockIpAddress,
+                BlockIpAddressMinutes = alert.BlockIpAddressMinutes,
+                LockOutUserAccounts = alert.LockOutUserAccounts
             };
         }
     }

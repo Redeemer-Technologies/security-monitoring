@@ -228,6 +228,7 @@ namespace net.redeemertech.Security
 
                             historyService.Add( history );
                             rockContext.SaveChanges();
+                            ApplyAlertResponseActions( rockContext, alert, history, resultTable, now );
                             result.TrippedCount++;
                             SendAlertEmail( alert, history );
                         }
@@ -258,6 +259,118 @@ namespace net.redeemertech.Security
         {
             var frequencyMinutes = Math.Max( 1, alert.EvaluationFrequencyMinutes );
             return !alert.LastRunDateTime.HasValue || alert.LastRunDateTime.Value.AddMinutes( frequencyMinutes ) <= now;
+        }
+
+        private void ApplyAlertResponseActions( RockContext rockContext, IISAlert alert, IISAlertHistory history, DataTable resultTable, DateTime now )
+        {
+            if ( alert.BlockIpAddress )
+            {
+                BlockIpAddresses( rockContext, alert, history, resultTable, now );
+            }
+
+            if ( alert.LockOutUserAccounts )
+            {
+                LockOutUserAccounts( rockContext, resultTable, now );
+            }
+        }
+
+        private void BlockIpAddresses( RockContext rockContext, IISAlert alert, IISAlertHistory history, DataTable resultTable, DateTime now )
+        {
+            var ipColumn = GetFirstColumnName( resultTable, "BlockedIpAddress", "c-ip" );
+            if ( ipColumn.IsNullOrWhiteSpace() )
+            {
+                throw new Exception( "IP blocking is enabled, but the alert query did not return a BlockedIpAddress or c-ip column." );
+            }
+
+            var blockMinutes = Math.Max( 1, alert.BlockIpAddressMinutes ?? 60 );
+            var expiresDateTime = now.AddMinutes( blockMinutes );
+            var blockedIpService = new IISAlertBlockedIpService( rockContext );
+
+            foreach ( var ipAddress in GetDistinctStringValues( resultTable, ipColumn ).Select( IISAlertBlockedIpCache.NormalizeIpAddress ).Where( v => v.IsNotNullOrWhiteSpace() ).Distinct( StringComparer.OrdinalIgnoreCase ) )
+            {
+                var blockedIp = blockedIpService.Queryable()
+                    .Where( b => b.IpAddress == ipAddress && b.ExpiresDateTime > now )
+                    .OrderByDescending( b => b.ExpiresDateTime )
+                    .FirstOrDefault();
+
+                if ( blockedIp == null )
+                {
+                    blockedIp = new IISAlertBlockedIp
+                    {
+                        IpAddress = ipAddress,
+                        BlockedDateTime = now
+                    };
+                    blockedIpService.Add( blockedIp );
+                }
+
+                blockedIp.ExpiresDateTime = blockedIp.ExpiresDateTime > expiresDateTime ? blockedIp.ExpiresDateTime : expiresDateTime;
+                blockedIp.IISAlertId = alert.Id;
+                blockedIp.AlertName = alert.Name;
+                blockedIp.IISAlertHistoryId = history.Id;
+
+                IISAlertBlockedIpCache.AddOrRefresh( ipAddress, blockedIp.ExpiresDateTime );
+            }
+
+            rockContext.SaveChanges();
+        }
+
+        private void LockOutUserAccounts( RockContext rockContext, DataTable resultTable, DateTime now )
+        {
+            var userLoginIdColumn = GetFirstColumnName( resultTable, "UserLoginId" );
+            var userNameColumn = GetFirstColumnName( resultTable, "UserName", "cs-username" );
+
+            if ( userLoginIdColumn.IsNullOrWhiteSpace() && userNameColumn.IsNullOrWhiteSpace() )
+            {
+                throw new Exception( "User account lockout is enabled, but the alert query did not return a UserLoginId, UserName, or cs-username column." );
+            }
+
+            var userLoginService = new UserLoginService( rockContext );
+            var userLoginIds = userLoginIdColumn.IsNotNullOrWhiteSpace()
+                ? GetDistinctStringValues( resultTable, userLoginIdColumn ).Select( v => v.AsIntegerOrNull() ).Where( v => v.HasValue ).Select( v => v.Value ).Distinct().ToList()
+                : new List<int>();
+            var userNames = userNameColumn.IsNotNullOrWhiteSpace()
+                ? GetDistinctStringValues( resultTable, userNameColumn ).Where( v => v != "-" ).Distinct( StringComparer.OrdinalIgnoreCase ).ToList()
+                : new List<string>();
+
+            var userLogins = userLoginService.Queryable()
+                .Where( u => userLoginIds.Contains( u.Id ) || userNames.Contains( u.UserName ) )
+                .ToList();
+
+            foreach ( var userLogin in userLogins )
+            {
+                userLogin.IsLockedOut = true;
+                userLogin.LastLockedOutDateTime = now;
+            }
+
+            if ( userLogins.Any() )
+            {
+                rockContext.SaveChanges();
+            }
+        }
+
+        private static string GetFirstColumnName( DataTable table, params string[] columnNames )
+        {
+            foreach ( var columnName in columnNames )
+            {
+                foreach ( DataColumn column in table.Columns )
+                {
+                    if ( column.ColumnName.Equals( columnName, StringComparison.OrdinalIgnoreCase ) )
+                    {
+                        return column.ColumnName;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static List<string> GetDistinctStringValues( DataTable table, string columnName )
+        {
+            return table.Rows.Cast<DataRow>()
+                .Select( r => r[columnName] == DBNull.Value ? null : r[columnName].ToStringSafe().Trim() )
+                .Where( v => v.IsNotNullOrWhiteSpace() )
+                .Distinct( StringComparer.OrdinalIgnoreCase )
+                .ToList();
         }
 
         private void SendAlertEmail( IISAlert alert, IISAlertHistory history )

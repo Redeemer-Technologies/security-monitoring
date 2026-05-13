@@ -46,6 +46,15 @@ namespace net.redeemertech.Security.Model
         [DataMember]
         public DateTime? LastRunDateTime { get; set; }
 
+        [DataMember]
+        public bool BlockIpAddress { get; set; }
+
+        [DataMember]
+        public int? BlockIpAddressMinutes { get; set; }
+
+        [DataMember]
+        public bool LockOutUserAccounts { get; set; }
+
         public virtual List<IISAlertHistory> Histories { get; set; }
 
         public override string ToString()

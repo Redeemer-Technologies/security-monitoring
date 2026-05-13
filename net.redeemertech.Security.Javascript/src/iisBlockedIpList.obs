@@ -1,0 +1,91 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <Grid v-else
+              title="IIS Blocked IPs"
+              :data="gridDataSource"
+              keyField="idKey"
+              itemTerm="Blocked IP"
+              tooltipField="ipAddress"
+              stickyHeader
+              @selectItem="goToHistory">
+            <TextColumn name="ipAddress"
+                        title="IP Address"
+                        field="ipAddress"
+                        :filter="textValueFilter"
+                        width="25%" />
+
+            <TextColumn name="alertName"
+                        title="Alert"
+                        field="alertName"
+                        :filter="textValueFilter"
+                        visiblePriority="sm"
+                        width="25%" />
+
+            <TextColumn name="blockedDateTime"
+                        title="Blocked"
+                        field="blockedDateTime"
+                        :filter="textValueFilter"
+                        visiblePriority="sm"
+                        width="15%" />
+
+            <TextColumn name="expiresDateTime"
+                        title="Expires"
+                        field="expiresDateTime"
+                        :filter="textValueFilter"
+                        visiblePriority="xs"
+                        width="15%" />
+
+            <TextColumn name="status"
+                        title="Status"
+                        field="status"
+                        :filter="textValueFilter"
+                        visiblePriority="xs"
+                        width="10%" />
+
+            <DeleteColumn v-if="isEditable" title="Unblock" @click="unblockIp" />
+        </Grid>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { computed, ref } from "vue";
+    import Grid, { DeleteColumn, TextColumn, textValueFilter } from "@Obsidian/Controls/grid";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { IisAlertsInitializationBag } from "./ViewModels/iisAlertsInitializationBag";
+
+    const config = useConfigurationValues<IisAlertsInitializationBag>();
+    const invokeBlockAction = useInvokeBlockAction();
+    const reloadBlock = useReloadBlock();
+    const blockedIps = ref(config.blockedIps ?? []);
+    const errorMessage = ref(config.errorMessage ?? "");
+    const isEditable = config.isEditable;
+    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: blockedIps.value as Record<string, unknown>[] }));
+
+    function goToHistory(idKey: string): void {
+        const blockedIp = blockedIps.value.find(b => b.idKey === idKey);
+
+        if (blockedIp?.historyIdKey && config.historyDetailPageUrl) {
+            window.location.href = config.historyDetailPageUrl.replace("((IdKey))", encodeURIComponent(blockedIp.historyIdKey));
+        }
+    }
+
+    async function unblockIp(idKey: string): Promise<void> {
+        const blockedIp = blockedIps.value.find(b => b.idKey === idKey);
+        if (!idKey || !confirm(`Unblock ${blockedIp?.ipAddress || "this IP address"}?`)) {
+            return;
+        }
+
+        const result = await invokeBlockAction("UnblockIp", { idKey });
+        if (result.isSuccess) {
+            reloadBlock();
+        }
+        else {
+            errorMessage.value = result.errorMessage || "Unable to unblock IP address.";
+        }
+    }
+</script>

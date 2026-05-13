@@ -73,6 +73,7 @@
     <Reference Include="System.Buffers, Version=4.0.4.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\Rock\packages\System.Buffers.4.6.0\lib\net462\System.Buffers.dll</HintPath>
     </Reference>
+    <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.ComponentModel.DataAnnotations" />
     <Reference Include="System.Core" />
     <Reference Include="System.Data" />
@@ -95,13 +96,18 @@
     <Reference Include="System.Xml.Linq" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="IISAlertBlockedIpCache.cs" />
+    <Compile Include="IISAlertBlockHttpModule.cs" />
     <Compile Include="IISLogDuckDbQuery.cs" />
     <Compile Include="Jobs\ProcessIISLogs.cs" />
     <Compile Include="Jobs\SecurityAudit.cs" />
     <Compile Include="Migration\001_Pages.cs" />
     <Compile Include="Migration\002_Jobs.cs" />
     <Compile Include="Migration\003_IISAlerts.cs" />
+    <Compile Include="Migration\004_IISAlertBlocking.cs" />
     <Compile Include="Model\IISAlert.cs" />
+    <Compile Include="Model\IISAlertBlockedIp.cs" />
+    <Compile Include="Model\IISAlertBlockedIpService.cs" />
     <Compile Include="Model\IISAlertHistory.cs" />
     <Compile Include="Model\IISAlertHistoryService.cs" />
     <Compile Include="Model\IISAlertService.cs" />

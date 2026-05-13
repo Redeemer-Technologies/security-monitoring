@@ -1,5 +1,4 @@
-using DuckDB.NET.Data;
-
+using net.redeemertech.Security;
 using net.redeemertech.Security.Blocks.ViewModels;
 
 using Rock;
@@ -23,10 +22,8 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
-using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Web.Hosting;
 
 namespace net.redeemertech.Security.Blocks.Blocks
 {
@@ -141,8 +138,7 @@ LIMIT 100";
     <div class=""alert alert-info"">No results found.</div>
 {% endif %}";
 
-        private const string LogsPlaceholder = "[[logs]]";
-        private const string DefaultDateRange = "Last|7|Day||";
+        private const string DefaultDateRange = IISLogDuckDbQuery.DefaultDateRange;
         private static readonly Regex SelectionUrlRegex = new Regex( @"\{[\w\s]+\}" );
 
         public override string ObsidianFileUrl => "/Plugins/net_redeemertech/Security/logQuery.obs";
@@ -277,7 +273,7 @@ LIMIT 100";
 
             box.IfValidProperty( nameof( box.Settings.Query ), () => block.SetAttributeValue( AttributeKey.Query, box.Settings.Query ) );
             box.IfValidProperty( nameof( box.Settings.QueryParams ), () => block.SetAttributeValue( AttributeKey.QueryParams, box.Settings.QueryParams ) );
-            box.IfValidProperty( nameof( box.Settings.DateRange ), () => block.SetAttributeValue( AttributeKey.DateRange, ToDelimitedDateRange( box.Settings.DateRange ) ) );
+            box.IfValidProperty( nameof( box.Settings.DateRange ), () => block.SetAttributeValue( AttributeKey.DateRange, IISLogDuckDbQuery.ToDelimitedDateRange( box.Settings.DateRange ) ) );
             box.IfValidProperty( nameof( box.Settings.Timeout ), () => block.SetAttributeValue( AttributeKey.Timeout, box.Settings.Timeout.ToString() ) );
             box.IfValidProperty( nameof( box.Settings.ResultsDisplayMode ), () => block.SetAttributeValue( AttributeKey.ResultsDisplayMode, box.Settings.ResultsDisplayMode ) );
             box.IfValidProperty( nameof( box.Settings.GridTitle ), () => block.SetAttributeValue( AttributeKey.GridTitle, box.Settings.GridTitle ) );
@@ -297,9 +293,13 @@ LIMIT 100";
             try
             {
                 result.MergeFields = GetMergeFields();
-                query = PrepareQuery( query, dateRange );
                 var sqlParameters = GetSqlParameters( GetAttributeValue( AttributeKey.QueryParams ).SplitDelimitedValues() );
-                var dataTable = ExecuteQuery( query, loadRows, timeout, sqlParameters );
+                var resolvedQuery = query.ResolveMergeFields( result.MergeFields, GetAttributeValue( AttributeKey.EnabledLavaCommands ) );
+                var defaultDateRange = GetDateRangeBag();
+                var delimitedDateRange = IISLogDuckDbQuery.ToDelimitedDateRange( ValidateDateRangeBag( dateRange, defaultDateRange ) );
+                var timeoutSeconds = timeout ?? GetAttributeValue( AttributeKey.Timeout ).AsIntegerOrNull() ?? 30;
+                var maximumParquetFiles = GetAttributeValue( AttributeKey.MaximumParquetFiles ).AsIntegerOrNull() ?? 1000;
+                var dataTable = new IISLogDuckDbQuery().Execute( resolvedQuery, delimitedDateRange, GetAttributeValue( AttributeKey.ParquetFolder ), maximumParquetFiles, timeoutSeconds, loadRows, sqlParameters );
 
                 result.DataTable = dataTable;
                 result.ActualColumnConfigurations = LoadColumnConfigurationsFromDataTable( dataTable );
@@ -394,87 +394,6 @@ LIMIT 100";
             };
         }
 
-        private string PrepareQuery( string query, SlidingDateRangeBag dateRange )
-        {
-            query = NormalizeQuery( query.ResolveMergeFields( GetMergeFields(), GetAttributeValue( AttributeKey.EnabledLavaCommands ) ) );
-
-            if ( !query.Contains( LogsPlaceholder ) )
-            {
-                throw new InvalidOperationException( "The query must include [[logs]] as the placeholder for the IIS log parquet source." );
-            }
-
-            if ( !Regex.IsMatch( query, @"^\s*(select|with)\b", RegexOptions.IgnoreCase ) )
-            {
-                throw new InvalidOperationException( "Only SELECT queries are allowed." );
-            }
-
-            var parquetFiles = GetParquetFiles( dateRange );
-            if ( !parquetFiles.Any() )
-            {
-                throw new InvalidOperationException( "No parquet files were found in the configured parquet folder for the selected date range. Please verify the Process IIS Logs jobs is running and that the IIS logs path is correct." );
-            }
-
-            var fileList = "[" + parquetFiles.Select( f => "'" + EscapeSqlString( f ) + "'" ).JoinStrings( "," ) + "]";
-            var logsFromSql = "( SELECT CAST(NULL AS BIGINT) AS \"sc-bytes\", CAST(NULL AS VARCHAR) AS \"cs-host\" WHERE 1 = 0 UNION ALL BY NAME SELECT * FROM read_parquet(" + fileList + ", union_by_name = true) )";
-
-            return query.Replace( LogsPlaceholder, logsFromSql );
-        }
-
-        private string NormalizeQuery( string query )
-        {
-            query = ( query ?? string.Empty ).Trim();
-
-            while ( query.EndsWith( ";" ) )
-            {
-                query = query.Substring( 0, query.Length - 1 ).Trim();
-            }
-
-            if ( query.Contains( ";" ) )
-            {
-                throw new InvalidOperationException( "Only one SQL statement is allowed." );
-            }
-
-            return query;
-        }
-
-        private DataTable ExecuteQuery( string query, bool loadRows, int? timeout, Dictionary<string, object> sqlParameters )
-        {
-            var sql = loadRows ? query : "SELECT * FROM (" + query + ") __log_query_schema LIMIT 0";
-
-            using ( var connection = new DuckDBConnection( "Data Source=:memory:" ) )
-            {
-                connection.Open();
-                using ( var command = connection.CreateCommand() )
-                {
-                    command.CommandText = sql;
-                    command.CommandTimeout = timeout ?? GetAttributeValue( AttributeKey.Timeout ).AsIntegerOrNull() ?? 30;
-
-                    AddSqlParameters( command, sqlParameters );
-
-                    using ( var reader = command.ExecuteReader() )
-                    {
-                        return LoadDataTable( reader );
-                    }
-                }
-            }
-        }
-
-        private void AddSqlParameters( DuckDBCommand command, Dictionary<string, object> sqlParameters )
-        {
-            if ( sqlParameters == null || !sqlParameters.Any() )
-            {
-                return;
-            }
-
-            foreach ( var sqlParameter in sqlParameters )
-            {
-                var parameter = command.CreateParameter();
-                parameter.ParameterName = sqlParameter.Key;
-                parameter.Value = sqlParameter.Value ?? DBNull.Value;
-                command.Parameters.Add( parameter );
-            }
-        }
-
         private Dictionary<string, object> GetSqlParameters( string[] queryParams )
         {
             if ( queryParams == null || queryParams.Length == 0 )
@@ -518,214 +437,6 @@ LIMIT 100";
             }
 
             return sqlParameters;
-        }
-
-        private DataTable LoadDataTable( IDataReader reader )
-        {
-            var dataTable = new DataTable();
-            var columnTypes = new List<Type>();
-
-            for ( var i = 0; i < reader.FieldCount; i++ )
-            {
-                var columnType = GetDataColumnType( reader.GetFieldType( i ) );
-                columnTypes.Add( columnType );
-                dataTable.Columns.Add( reader.GetName( i ), columnType );
-            }
-
-            while ( reader.Read() )
-            {
-                var values = new object[reader.FieldCount];
-                for ( var i = 0; i < reader.FieldCount; i++ )
-                {
-                    values[i] = reader.IsDBNull( i )
-                        ? DBNull.Value
-                        : ConvertDuckDbValue( reader.GetValue( i ), columnTypes[i] );
-                }
-
-                dataTable.Rows.Add( values );
-            }
-
-            return dataTable;
-        }
-
-        private Type GetDataColumnType( Type readerFieldType )
-        {
-            if ( readerFieldType == typeof( TimeSpan ) || readerFieldType?.Namespace == "DuckDB.NET.Native" )
-            {
-                return typeof( string );
-            }
-
-            return readerFieldType ?? typeof( object );
-        }
-
-        private object ConvertDuckDbValue( object value, Type targetType )
-        {
-            if ( value == null || value == DBNull.Value )
-            {
-                return DBNull.Value;
-            }
-
-            var duckDbNativeValue = ConvertDuckDbNativeValue( value );
-            if ( duckDbNativeValue != null )
-            {
-                return duckDbNativeValue;
-            }
-
-            if ( targetType == typeof( string ) )
-            {
-                return value.ToString();
-            }
-
-            if ( targetType.IsInstanceOfType( value ) )
-            {
-                return value;
-            }
-
-            try
-            {
-                return Convert.ChangeType( value, targetType );
-            }
-            catch
-            {
-                return value.ToString();
-            }
-        }
-
-        private object ConvertDuckDbNativeValue( object value )
-        {
-            var valueType = value.GetType();
-            if ( valueType.Namespace != "DuckDB.NET.Native" )
-            {
-                return null;
-            }
-
-            if ( valueType.Name == "DuckDBTimeOnly" )
-            {
-                var hour = ( byte ) valueType.GetProperty( "Hour" ).GetValue( value );
-                var minute = ( byte ) valueType.GetProperty( "Min" ).GetValue( value );
-                var second = ( byte ) valueType.GetProperty( "Sec" ).GetValue( value );
-                var microsecond = ( int ) valueType.GetProperty( "Microsecond" ).GetValue( value );
-
-                var time = string.Format( "{0:00}:{1:00}:{2:00}", hour, minute, second );
-                return microsecond > 0
-                    ? time + "." + microsecond.ToString( "000000" ).TrimEnd( '0' )
-                    : time;
-            }
-
-            var toDateTimeMethod = valueType.GetMethod( "ToDateTime", Type.EmptyTypes );
-            if ( toDateTimeMethod != null )
-            {
-                return ( ( DateTime ) toDateTimeMethod.Invoke( value, null ) ).ToString( "o" );
-            }
-
-            return value.ToString();
-        }
-
-        private List<string> GetParquetFiles( SlidingDateRangeBag dateRange )
-        {
-            var parquetFolder = ResolveParquetFolder();
-            if ( !Directory.Exists( parquetFolder ) )
-            {
-                return new List<string>();
-            }
-
-            var maxFiles = Math.Max( 1, GetAttributeValue( AttributeKey.MaximumParquetFiles ).AsIntegerOrNull() ?? 1000 );
-            var actualDateRange = GetActualDateRange( dateRange );
-
-            return Directory.EnumerateFiles( parquetFolder, "*.parquet", SearchOption.AllDirectories )
-                .Where( f => f.IndexOf( Path.DirectorySeparatorChar + "temp" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase ) < 0 )
-                .Where( f => IsParquetFileInDateRange( f, actualDateRange ) )
-                .OrderBy( f => f, StringComparer.OrdinalIgnoreCase )
-                .Take( maxFiles )
-                .ToList();
-        }
-
-        private DateRange GetActualDateRange( SlidingDateRangeBag dateRange )
-        {
-            var defaultDateRange = GetDateRangeBag();
-            return Rock.Web.UI.Controls.SlidingDateRangePicker.CalculateDateRangeFromDelimitedValues( ToDelimitedDateRange( ValidateDateRangeBag( dateRange, defaultDateRange ) ) );
-        }
-
-        private bool IsParquetFileInDateRange( string parquetFile, DateRange dateRange )
-        {
-            DateTime fileDate;
-            if ( !TryGetDateFromParquetFileName( parquetFile, out fileDate ) )
-            {
-                return false;
-            }
-
-            if ( dateRange?.Start.HasValue == true && fileDate.Date < dateRange.Start.Value.Date )
-            {
-                return false;
-            }
-
-            if ( dateRange?.End.HasValue == true && fileDate.Date > dateRange.End.Value.Date )
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        private static bool TryGetDateFromParquetFileName( string parquetFile, out DateTime fileDate )
-        {
-            fileDate = default( DateTime );
-
-            var fileName = Path.GetFileNameWithoutExtension( parquetFile );
-            if ( fileName.IsNullOrWhiteSpace() )
-            {
-                return false;
-            }
-
-            var match = Regex.Match( fileName, @"^(?<date>\d{8})(?:_|$)" );
-            if ( !match.Success )
-            {
-                return false;
-            }
-
-            return DateTime.TryParseExact(
-                match.Groups["date"].Value,
-                "yyyyMMdd",
-                System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None,
-                out fileDate );
-        }
-
-        private string ResolveParquetFolder()
-        {
-            var configuredFolder = GetAttributeValue( AttributeKey.ParquetFolder );
-            if ( configuredFolder.IsNullOrWhiteSpace() )
-            {
-                configuredFolder = "IISLogParquet";
-            }
-
-            configuredFolder = Environment.ExpandEnvironmentVariables( configuredFolder );
-            if ( Path.IsPathRooted( configuredFolder ) )
-            {
-                return configuredFolder;
-            }
-
-            return Path.Combine( GetAppDataFolder(), configuredFolder );
-        }
-
-        private static string GetAppDataFolder()
-        {
-            var appDataFolder = HostingEnvironment.MapPath( "~/App_Data" );
-            if ( appDataFolder.IsNullOrWhiteSpace() )
-            {
-                var dataDirectory = AppDomain.CurrentDomain.GetData( "DataDirectory" ) as string;
-                if ( dataDirectory.IsNotNullOrWhiteSpace() )
-                {
-                    appDataFolder = dataDirectory;
-                }
-            }
-
-            if ( appDataFolder.IsNullOrWhiteSpace() )
-            {
-                appDataFolder = Path.Combine( AppDomain.CurrentDomain.BaseDirectory, "App_Data" );
-            }
-
-            return appDataFolder;
         }
 
         private Dictionary<string, object> GetMergeFields()
@@ -874,7 +585,7 @@ LIMIT 100";
 
         private SlidingDateRangeBag GetDateRangeBag()
         {
-            return ToSlidingDateRangeBag( GetAttributeValue( AttributeKey.DateRange ).IfEmpty( DefaultDateRange ) )
+            return IISLogDuckDbQuery.ToSlidingDateRangeBag( GetAttributeValue( AttributeKey.DateRange ).IfEmpty( DefaultDateRange ) )
                 ?? new SlidingDateRangeBag
                 {
                     RangeType = SlidingDateRangeType.Last,
@@ -916,53 +627,6 @@ LIMIT 100";
             return dateRange;
         }
 
-        private static SlidingDateRangeBag ToSlidingDateRangeBag( string delimitedDateRange )
-        {
-            if ( delimitedDateRange.IsNullOrWhiteSpace() )
-            {
-                return null;
-            }
-
-            var parts = delimitedDateRange.Split( '|' );
-            if ( parts.Length != 5 )
-            {
-                return null;
-            }
-
-            SlidingDateRangeType rangeType;
-            if ( !Enum.TryParse( parts[0], true, out rangeType ) )
-            {
-                return null;
-            }
-
-            TimeUnitType timeUnit;
-            var hasTimeUnit = Enum.TryParse( parts[2], true, out timeUnit );
-
-            return new SlidingDateRangeBag
-            {
-                RangeType = rangeType,
-                TimeValue = parts[1].AsIntegerOrNull(),
-                TimeUnit = hasTimeUnit ? timeUnit : ( TimeUnitType? ) null,
-                LowerDate = parts[3].AsDateTime(),
-                UpperDate = parts[4].AsDateTime()
-            };
-        }
-
-        private static string ToDelimitedDateRange( SlidingDateRangeBag dateRange )
-        {
-            if ( dateRange == null )
-            {
-                return null;
-            }
-
-            var timeValue = dateRange.TimeValue?.ToString() ?? string.Empty;
-            var timeUnit = dateRange.TimeUnit?.ToString() ?? string.Empty;
-            var lowerDate = dateRange.LowerDate?.ToString( "o" ) ?? string.Empty;
-            var upperDate = dateRange.UpperDate?.ToString( "o" ) ?? string.Empty;
-
-            return string.Format( "{0}|{1}|{2}|{3}|{4}", dateRange.RangeType, timeValue, timeUnit, lowerDate, upperDate );
-        }
-
         private string GetLavaTemplate()
         {
             return GetAttributeValue( AttributeKey.LavaTemplate ).IfEmpty( DefaultLavaTemplate );
@@ -977,11 +641,6 @@ LIMIT 100";
         private bool IsLavaTemplateDisplayMode()
         {
             return GetResultsDisplayMode() == DisplayMode.LavaTemplate.Value;
-        }
-
-        private static string EscapeSqlString( string value )
-        {
-            return value.Replace( "'", "''" );
         }
 
         private class LogQueryResults

@@ -21,15 +21,27 @@ namespace net.redeemertech.Security
 
         public DataTable Execute( string query, string dateRange, string parquetFolder, int maximumParquetFiles, int timeoutSeconds )
         {
+            return Execute( query, dateRange, parquetFolder, maximumParquetFiles, timeoutSeconds, true, null );
+        }
+
+        public DataTable Execute( string query, string dateRange, string parquetFolder, int maximumParquetFiles, int timeoutSeconds, bool loadRows, Dictionary<string, object> sqlParameters )
+        {
             var preparedQuery = PrepareQuery( query, dateRange, parquetFolder, maximumParquetFiles );
+            return ExecutePreparedQuery( preparedQuery, timeoutSeconds, loadRows, sqlParameters );
+        }
+
+        public DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows = true, Dictionary<string, object> sqlParameters = null )
+        {
+            var sql = loadRows ? preparedQuery : "SELECT * FROM (" + preparedQuery + ") __log_query_schema LIMIT 0";
 
             using ( var connection = new DuckDBConnection( "Data Source=:memory:" ) )
             {
                 connection.Open();
                 using ( var command = connection.CreateCommand() )
                 {
-                    command.CommandText = preparedQuery;
+                    command.CommandText = sql;
                     command.CommandTimeout = timeoutSeconds;
+                    AddSqlParameters( command, sqlParameters );
 
                     using ( var reader = command.ExecuteReader() )
                     {
@@ -47,10 +59,10 @@ namespace net.redeemertech.Security
                 throw new InvalidOperationException( "The query must include [[logs]] as the placeholder for the IIS log parquet source." );
             }
 
-            var placeholderCount = Regex.Matches(query, Regex.Escape(LogsPlaceholder)).Count;
-            if (placeholderCount != 1)
+            var placeholderCount = Regex.Matches( query, Regex.Escape( LogsPlaceholder ) ).Count;
+            if ( placeholderCount != 1 )
             {
-                throw new InvalidOperationException("The query must include [[logs]] exactly once.");
+                throw new InvalidOperationException( "The query must include [[logs]] exactly once." );
             }
 
             if ( !Regex.IsMatch( query, @"^\s*(select|with)\b", RegexOptions.IgnoreCase ) )
@@ -77,9 +89,9 @@ namespace net.redeemertech.Security
                 return new List<string>();
             }
 
-            var actualDateRange = Rock.Web.UI.Controls.SlidingDateRangePicker.CalculateDateRangeFromDelimitedValues( dateRange.IfEmpty( DefaultDateRange ) );
+            var actualDateRange = GetActualDateRange( dateRange );
             return Directory.EnumerateFiles( parquetFolder, "*.parquet", SearchOption.AllDirectories )
-                .Where( f => f.IndexOf( Path.DirectorySeparatorChar + "temp" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase ) < 0 )
+                .Where( f => !IsInTempFolder( f, parquetFolder ) )
                 .Where( f => IsParquetFileInDateRange( f, actualDateRange ) )
                 .OrderBy( f => f, StringComparer.OrdinalIgnoreCase )
                 .Take( Math.Max( 1, maximumParquetFiles ) )
@@ -138,8 +150,24 @@ namespace net.redeemertech.Security
             {
                 query = query.Substring( 0, query.Length - 1 ).Trim();
             }
-
+            
             return query;
+        }
+
+        private static void AddSqlParameters( DuckDBCommand command, Dictionary<string, object> sqlParameters )
+        {
+            if ( sqlParameters == null || !sqlParameters.Any() )
+            {
+                return;
+            }
+
+            foreach ( var sqlParameter in sqlParameters )
+            {
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = sqlParameter.Key;
+                parameter.Value = sqlParameter.Value ?? DBNull.Value;
+                command.Parameters.Add( parameter );
+            }
         }
 
         private static DataTable LoadDataTable( IDataReader reader )
@@ -175,12 +203,60 @@ namespace net.redeemertech.Security
                 return DBNull.Value;
             }
 
-            if ( value.GetType().Namespace == "DuckDB.NET.Native" || targetType == typeof( string ) )
+            var duckDbNativeValue = ConvertDuckDbNativeValue( value );
+            if ( duckDbNativeValue != null )
+            {
+                return duckDbNativeValue;
+            }
+
+            if ( targetType == typeof( string ) )
             {
                 return value.ToString();
             }
 
-            return targetType.IsInstanceOfType( value ) ? value : value.ToString();
+            if ( targetType.IsInstanceOfType( value ) )
+            {
+                return value;
+            }
+
+            try
+            {
+                return Convert.ChangeType( value, targetType );
+            }
+            catch
+            {
+                return value.ToString();
+            }
+        }
+
+        private static object ConvertDuckDbNativeValue( object value )
+        {
+            var valueType = value.GetType();
+            if ( valueType.Namespace != "DuckDB.NET.Native" )
+            {
+                return null;
+            }
+
+            if ( valueType.Name == "DuckDBTimeOnly" )
+            {
+                var hour = ( byte ) valueType.GetProperty( "Hour" ).GetValue( value );
+                var minute = ( byte ) valueType.GetProperty( "Min" ).GetValue( value );
+                var second = ( byte ) valueType.GetProperty( "Sec" ).GetValue( value );
+                var microsecond = ( int ) valueType.GetProperty( "Microsecond" ).GetValue( value );
+
+                var time = string.Format( "{0:00}:{1:00}:{2:00}", hour, minute, second );
+                return microsecond > 0
+                    ? time + "." + microsecond.ToString( "000000" ).TrimEnd( '0' )
+                    : time;
+            }
+
+            var toDateTimeMethod = valueType.GetMethod( "ToDateTime", Type.EmptyTypes );
+            if ( toDateTimeMethod != null )
+            {
+                return ( ( DateTime ) toDateTimeMethod.Invoke( value, null ) ).ToString( "o" );
+            }
+
+            return value.ToString();
         }
 
         private static bool IsParquetFileInDateRange( string parquetFile, DateRange dateRange )
@@ -192,6 +268,40 @@ namespace net.redeemertech.Security
             }
 
             return !( dateRange?.Start.HasValue == true && fileDate.Date < dateRange.Start.Value.Date ) && !( dateRange?.End.HasValue == true && fileDate.Date > dateRange.End.Value.Date );
+        }
+
+        private static DateRange GetActualDateRange( string dateRange )
+        {
+            dateRange = dateRange.IfEmpty( DefaultDateRange );
+            var rangeType = dateRange.Split( '|' ).FirstOrDefault();
+            if ( rangeType.Equals( "All", StringComparison.OrdinalIgnoreCase ) || rangeType == "-1" )
+            {
+                return null;
+            }
+
+            return Rock.Web.UI.Controls.SlidingDateRangePicker.CalculateDateRangeFromDelimitedValues( dateRange );
+        }
+
+        private static bool IsInTempFolder( string parquetFile, string parquetFolder )
+        {
+            var root = Path.GetFullPath( parquetFolder ).TrimEnd( Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar );
+            var directory = Directory.GetParent( Path.GetFullPath( parquetFile ) );
+            while ( directory != null && directory.FullName.StartsWith( root, StringComparison.OrdinalIgnoreCase ) )
+            {
+                if ( directory.FullName.Equals( root, StringComparison.OrdinalIgnoreCase ) )
+                {
+                    return false;
+                }
+
+                if ( directory.Name.Equals( "temp", StringComparison.OrdinalIgnoreCase ) )
+                {
+                    return true;
+                }
+
+                directory = directory.Parent;
+            }
+
+            return false;
         }
 
         private static bool TryGetDateFromParquetFileName( string parquetFile, out DateTime fileDate )

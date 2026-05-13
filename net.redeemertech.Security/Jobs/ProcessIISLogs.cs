@@ -1,14 +1,21 @@
 using DuckDB.NET.Data;
 
+using net.redeemertech.Security.Model;
+
 using Quartz;
 
 using Rock;
 using Rock.Attribute;
+using Rock.Communication;
+using Rock.Data;
 using Rock.Jobs;
+using Rock.Lava;
+using Rock.Model;
 
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Data;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -44,10 +51,15 @@ namespace net.redeemertech.Security
         false,
         key: AttributeKey.ReprocessAllFilesOnNextRun,
         order: 3 )]
+    [IntegerField( "Maximum Parquet Files", "The maximum number of parquet files to include in each alert query.", false, 1000, key: AttributeKey.MaximumParquetFiles, order: 4 )]
+    [IntegerField( "Query Timeout Seconds", "The amount of time in seconds to allow each alert query to run before timing out.", false, 10, key: AttributeKey.QueryTimeoutSeconds, order: 5 )]
+    [SystemCommunicationField( "Alert Email", "The system communication used to notify recipients when an IIS alert trips.", true, key: AttributeKey.AlertEmail, order: 6, defaultSystemCommunicationGuid: "94fbe63b-5e70-4332-898a-d8031512dc82" )]
+    [LinkedPage( "Alert History Detail Page", "The page that displays a single tripped alert history record.", false, key: AttributeKey.AlertHistoryDetailPage, order: 7, defaultValue: "20FBEDA7-3028-4924-B29A-B445CF6CAEAE" )]
     [DisallowConcurrentExecution]
     public class ProcessIISLogs : RockJob
     {
         private const string StateFileName = "iis-log-parquet-state.json";
+        private const string DefaultSummaryLava = "IIS alert returned {{ results | Size }} row(s).";
 
         private static readonly Encoding Utf8NoBom = new UTF8Encoding( false );
 
@@ -57,15 +69,38 @@ namespace net.redeemertech.Security
             public const string ParquetFolder = "ParquetFolder";
             public const string RetentionDays = "RetentionDays";
             public const string ReprocessAllFilesOnNextRun = "ReprocessAllFilesOnNextRun";
+            public const string MaximumParquetFiles = "MaximumParquetFiles";
+            public const string QueryTimeoutSeconds = "QueryTimeoutSeconds";
+            public const string AlertEmail = "AlertEmail";
+            public const string AlertHistoryDetailPage = "AlertHistoryDetailPage";
         }
 
         public override void Execute()
+        {
+            var logProcessingResult = ProcessLogPhase();
+            if ( logProcessingResult.IsNullOrWhiteSpace() )
+            {
+                return;
+            }
+
+            var alertProcessingResult = ProcessAlertPhase();
+            this.Result = string.Format( "{0} {1}", logProcessingResult, alertProcessingResult.Summary );
+
+            if ( alertProcessingResult.Errors.Any() )
+            {
+                var message = " Errors: " + alertProcessingResult.Errors.JoinStrings( "; " );
+                this.Result += message;
+                throw new Exception( message );
+            }
+        }
+
+        private string ProcessLogPhase()
         {
             var inputFolder = ResolveIISLogFolder();
             if ( !Directory.Exists( inputFolder ) )
             {
                 this.Result = string.Format( "IIS log folder does not exist: {0}", inputFolder );
-                return;
+                return string.Empty;
             }
 
             var parquetFolder = ResolveParquetFolder();
@@ -129,7 +164,7 @@ namespace net.redeemertech.Security
             CleanupTempFolder( parquetFolder );
             SaveState( statePath, state );
 
-            this.Result = string.Format(
+            return string.Format(
                 "Processed {0:N0} rows from {1:N0} IIS log files. Skipped {2:N0} unchanged IIS log files and {3:N0} expired IIS log files. Created {4:N0} parquet files, compacted {5:N0} prior-day parquet files, and deleted {6:N0} expired parquet files.",
                 processedRows,
                 processedLogFiles,
@@ -138,6 +173,166 @@ namespace net.redeemertech.Security
                 createdParquetFiles,
                 compactedParquetFiles,
                 deletedParquetFiles );
+        }
+
+        private AlertProcessingResult ProcessAlertPhase()
+        {
+            using ( var rockContext = new RockContext() )
+            {
+                var alertService = new IISAlertService( rockContext );
+                var historyService = new IISAlertHistoryService( rockContext );
+                var now = RockDateTime.Now;
+                var alerts = alertService.Queryable()
+                    .Where( a => a.IsActive )
+                    .OrderBy( a => a.Name )
+                    .ToList();
+
+                var result = new AlertProcessingResult();
+                var defaultParquetFolder = GetAttributeValue( AttributeKey.ParquetFolder );
+                var defaultMaximumParquetFiles = GetAttributeValue( AttributeKey.MaximumParquetFiles ).AsIntegerOrNull() ?? 1000;
+                var defaultQueryTimeoutSeconds = GetAttributeValue( AttributeKey.QueryTimeoutSeconds ).AsIntegerOrNull() ?? 10;
+
+                foreach ( var alert in alerts )
+                {
+                    if ( !ShouldEvaluate( alert, now ) )
+                    {
+                        continue;
+                    }
+
+                    result.EvaluatedCount++;
+                    try
+                    {
+                        var resultTable = new IISLogDuckDbQuery().Execute(
+                            alert.Query,
+                            alert.DateRange,
+                            defaultParquetFolder,
+                            defaultMaximumParquetFiles,
+                            defaultQueryTimeoutSeconds );
+
+                        alert.LastRunDateTime = now;
+
+                        if ( resultTable.Rows.Count > 0 )
+                        {
+                            var summary = ResolveSummary( alert, resultTable );
+                            var history = new IISAlertHistory
+                            {
+                                IISAlertId = alert.Id,
+                                AlertName = alert.Name,
+                                TrippedDateTime = now,
+                                ResultCount = resultTable.Rows.Count,
+                                Summary = summary,
+                                ResultJson = SerializeResults( resultTable )
+                            };
+
+                            historyService.Add( history );
+                            rockContext.SaveChanges();
+                            result.TrippedCount++;
+                            SendAlertEmail( alert, history );
+                        }
+                        else
+                        {
+                            rockContext.SaveChanges();
+                        }
+                    }
+                    catch ( Exception ex )
+                    {
+                        result.Errors.Add( string.Format( "{0}: {1}", alert.Name, ex.Message ) );
+                    }
+                }
+
+                return result;
+            }
+        }
+
+        private static bool ShouldEvaluate( IISAlert alert, DateTime now )
+        {
+            var frequencyMinutes = Math.Max( 1, alert.EvaluationFrequencyMinutes );
+            return !alert.LastRunDateTime.HasValue || alert.LastRunDateTime.Value.AddMinutes( frequencyMinutes ) <= now;
+        }
+
+        private void SendAlertEmail( IISAlert alert, IISAlertHistory history )
+        {
+            var systemCommunicationGuid = GetAttributeValue( AttributeKey.AlertEmail ).AsGuidOrNull();
+            var recipientEmails = alert.NotificationEmails.SplitDelimitedValues().Where( e => e.IsNotNullOrWhiteSpace() ).Distinct().ToList();
+            if ( !systemCommunicationGuid.HasValue || !recipientEmails.Any() )
+            {
+                return;
+            }
+
+            var mergeFields = Rock.Lava.LavaHelper.GetCommonMergeFields( null );
+            mergeFields.AddOrReplace( "AlertName", alert.Name );
+            mergeFields.AddOrReplace( "AlertType", "IIS Alert" );
+            mergeFields.AddOrReplace( "AlertDate", history.TrippedDateTime.ToShortDateString() );
+            mergeFields.AddOrReplace( "AlertTime", history.TrippedDateTime.ToShortTimeString() );
+            mergeFields.AddOrReplace( "Summary", history.Summary );
+            mergeFields.AddOrReplace( "AlertHistoryUrl", GetAlertHistoryUrl( history.Id ) );
+
+            var emailMessage = new RockEmailMessage( systemCommunicationGuid.Value );
+            foreach ( var email in recipientEmails )
+            {
+                emailMessage.AddRecipient( RockEmailMessageRecipient.CreateAnonymous( email, mergeFields ) );
+            }
+
+            var errors = new List<string>();
+            emailMessage.Send( out errors );
+            if ( errors.Any() )
+            {
+                throw new Exception( errors.JoinStrings( "; " ) );
+            }
+        }
+
+        private string GetAlertHistoryUrl( int historyId )
+        {
+            var pageValue = GetAttributeValue( AttributeKey.AlertHistoryDetailPage );
+            if ( pageValue.IsNullOrWhiteSpace() )
+            {
+                return string.Empty;
+            }
+
+            var pageReference = new Rock.Web.PageReference( pageValue, new Dictionary<string, string> { { "IISAlertHistoryId", historyId.ToString() } } );
+            return pageReference.PageId > 0 ? pageReference.BuildUrl() : string.Empty;
+        }
+
+        private static string SerializeResults( DataTable table )
+        {
+            var rows = new List<Dictionary<string, object>>();
+            foreach ( DataRow row in table.Rows )
+            {
+                var values = new Dictionary<string, object>();
+                foreach ( DataColumn column in table.Columns )
+                {
+                    var value = row[column];
+                    values[column.ColumnName] = value == DBNull.Value ? null : value;
+                }
+
+                rows.Add( values );
+            }
+
+            return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize( rows );
+        }
+
+        private static string ResolveSummary( IISAlert alert, DataTable table )
+        {
+            var mergeFields = new Dictionary<string, object>
+            {
+                { "results", GetLavaResults( table ) }
+            };
+
+            var template = alert.SummaryLava.IfEmpty( DefaultSummaryLava );
+
+            // Do not enable Lava commands here; the summary can only format the in-memory query results.
+            return template.ResolveMergeFields( mergeFields, string.Empty );
+        }
+
+        private static List<object> GetLavaResults( DataTable table )
+        {
+            var rows = new List<object>();
+            foreach ( DataRow row in table.Rows )
+            {
+                rows.Add( new LavaResultRow( row ) );
+            }
+
+            return rows;
         }
 
         private ProcessingResult ProcessLogFile( DuckDBConnection connection, FileInfo fileInfo, string parquetFolder, LogFileState fileState )
@@ -735,6 +930,65 @@ namespace net.redeemertech.Security
             {
                 var bytes = sha256.ComputeHash( Utf8NoBom.GetBytes( value ?? string.Empty ) );
                 return BitConverter.ToString( bytes ).Replace( "-", string.Empty ).ToLowerInvariant();
+            }
+        }
+
+        private class AlertProcessingResult
+        {
+            public AlertProcessingResult()
+            {
+                Errors = new List<string>();
+            }
+
+            public int EvaluatedCount { get; set; }
+
+            public int TrippedCount { get; set; }
+
+            public List<string> Errors { get; set; }
+
+            public string Summary
+            {
+                get
+                {
+                    return string.Format( "Evaluated {0:N0} IIS alerts; {1:N0} tripped.", EvaluatedCount, TrippedCount );
+                }
+            }
+        }
+
+        private class LavaResultRow : LavaDataObject
+        {
+            private readonly DataRow _dataRow;
+
+            public LavaResultRow( DataRow dataRow )
+            {
+                _dataRow = dataRow;
+            }
+
+            [LavaVisible]
+            public override List<string> AvailableKeys
+            {
+                get
+                {
+                    var keys = new List<string>();
+                    foreach ( DataColumn column in _dataRow.Table.Columns )
+                    {
+                        keys.Add( column.ColumnName );
+                    }
+
+                    return keys;
+                }
+            }
+
+            protected override bool OnTryGetValue( string key, out object result )
+            {
+                if ( _dataRow.Table.Columns.Contains( key ) )
+                {
+                    var value = _dataRow[key];
+                    result = value == DBNull.Value ? null : value;
+                    return true;
+                }
+
+                return base.OnTryGetValue( key, out result );
             }
         }
 

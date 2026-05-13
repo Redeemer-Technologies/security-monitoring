@@ -96,7 +96,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="IISLogDuckDbQuery.cs" />
-    <Compile Include="Jobs\ProcessIISAlerts.cs" />
     <Compile Include="Jobs\ProcessIISLogs.cs" />
     <Compile Include="Jobs\SecurityAudit.cs" />
     <Compile Include="Migration\001_Pages.cs" />

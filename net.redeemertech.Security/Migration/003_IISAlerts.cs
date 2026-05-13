@@ -6,9 +6,8 @@ namespace net.redeemertech.Security.Migrations
     [MigrationNumber( 3, "1.17.0" )]
     public class IISAlerts : Migration
     {
-        private const string ProcessIISAlertsJobGuid = "05cb25eb-1faa-4553-8799-e3a068f042d8";
         private const string IISAlertTriggeredSystemCommunicationGuid = "94fbe63b-5e70-4332-898a-d8031512dc82";
-        private const string ProcessIISAlertsAlertEmailAttributeGuid = "bf8e3170-4996-4754-a31d-74aac21cf1dd";
+        private const string ProcessIISLogsAlertEmailAttributeGuid = "bf8e3170-4996-4754-a31d-74aac21cf1dd";
         public override void Up()
         {
             Sql( @"
@@ -78,21 +77,12 @@ namespace net.redeemertech.Security.Migrations
             RockMigrationHelper.AddOrUpdateBlockTypeAttribute("49531c16-1f93-49d9-bcab-9e7fd889e1bf", Rock.SystemGuid.FieldType.PAGE_REFERENCE, "Detail Page", "DetailPage", "Detail Page", @"Page containing the IIS Alert Detail block.", 0, @"", "fed8baec-1758-4dfa-84f2-c394c8f34616" );
             RockMigrationHelper.AddOrUpdateBlockTypeAttribute("655ca478-fdcf-4996-901c-6011b485e52b", Rock.SystemGuid.FieldType.PAGE_REFERENCE, "Detail Page", "DetailPage", "Detail Page", @"Page containing the IIS Alert History Detail block.", 0, @"", "2ae8485c-0589-4c6b-9bd4-0cb24e613c64" );
 
-
-            AddOrUpdateServiceJob(
-                ProcessIISAlertsJobGuid,
-                "Process IIS Alerts",
-                "Evaluates active IIS alerts against processed IIS log parquet files and emails configured recipients when an alert trips.",
-                "net.redeemertech.Security.ProcessIISAlerts",
-                "0 0/5 * 1/1 * ? *");
-
-            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.TEXT, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Parquet Folder", "Parquet Folder", @"The folder containing parquet files created by Process IIS Logs. Relative paths are resolved under App_Data.", 0, @"IISLogParquet", "111850d7-3f83-4b83-8f3a-27e8c75ea08b", "ParquetFolder");
-            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.INTEGER, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Maximum Parquet Files", "Maximum Parquet Files", @"The maximum number of parquet files to include in each alert query.", 1, @"1000", "35ed9fcb-78a2-4dee-9635-e5bc9ae3a398", "MaximumParquetFiles");
-            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.INTEGER, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Query Timeout Seconds", "Query Timeout Seconds", @"The amount of time in seconds to allow each alert query to run before timing out.", 2, @"30", "f1025648-a4e5-49a7-a008-9079d6aac649", "QueryTimeoutSeconds");
+            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.INTEGER, "Class", "net.redeemertech.Security.ProcessIISLogs", "Maximum Parquet Files", "Maximum Parquet Files", @"The maximum number of parquet files to include in each alert query.", 4, @"1000", "35ed9fcb-78a2-4dee-9635-e5bc9ae3a398", "MaximumParquetFiles");
+            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.INTEGER, "Class", "net.redeemertech.Security.ProcessIISLogs", "Query Timeout Seconds", "Query Timeout Seconds", @"The amount of time in seconds to allow each alert query to run before timing out.", 5, @"10", "f1025648-a4e5-49a7-a008-9079d6aac649", "QueryTimeoutSeconds");
             AddOrUpdateIISAlertTriggeredSystemCommunication();
 
-            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.SYSTEM_COMMUNICATION, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Alert Email", "Alert Email", @"The system communication used to notify recipients when an IIS alert trips. The merge fields AlertType, AlertName, AlertDate, AlertTime, Summary, and AlertHistoryUrl are available.", 3, IISAlertTriggeredSystemCommunicationGuid, ProcessIISAlertsAlertEmailAttributeGuid, "AlertEmail");
-            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.PAGE_REFERENCE, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Alert History Detail Page", "Alert History Detail Page", @"The page that displays a single tripped alert history record.", 4, @"", "652fbada-170c-42b1-b846-614f31c7f6c8", "AlertHistoryDetailPage");
+            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.SYSTEM_COMMUNICATION, "Class", "net.redeemertech.Security.ProcessIISLogs", "Alert Email", "Alert Email", @"The system communication used to notify recipients when an IIS alert trips. The merge fields AlertType, AlertName, AlertDate, AlertTime, Summary, and AlertHistoryUrl are available.", 6, IISAlertTriggeredSystemCommunicationGuid, ProcessIISLogsAlertEmailAttributeGuid, "AlertEmail");
+            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.PAGE_REFERENCE, "Class", "net.redeemertech.Security.ProcessIISLogs", "Alert History Detail Page", "Alert History Detail Page", @"The page that displays a single tripped alert history record.", 7, @"", "652fbada-170c-42b1-b846-614f31c7f6c8", "AlertHistoryDetailPage");
 
             // Add Page 
             //  Internal Name: Alerts
@@ -191,56 +181,8 @@ namespace net.redeemertech.Security.Migrations
                 IF OBJECT_ID(N'[dbo].[_net_redeemertech_IISAlert]', N'U') IS NOT NULL DROP TABLE [dbo].[_net_redeemertech_IISAlert];" );
 
             Sql($@"
-                DELETE FROM [ServiceJob]
-                WHERE [Guid] IN ('{ProcessIISAlertsJobGuid}')");
-
-            Sql($@"
                 DELETE FROM [SystemCommunication]
                 WHERE [Guid] IN ('{IISAlertTriggeredSystemCommunicationGuid}')");
-        }
-
-        private void AddOrUpdateServiceJob(string guid, string name, string description, string jobClass, string cronExpression)
-        {
-            Sql($@"
-                DECLARE @JobId int = (
-                    SELECT TOP 1 [Id]
-                    FROM [ServiceJob]
-                    WHERE [Guid] = '{guid}' OR [Class] = '{jobClass}'
-                    ORDER BY CASE WHEN [Guid] = '{guid}' THEN 0 ELSE 1 END
-                );
-
-                IF @JobId IS NULL
-                BEGIN
-                    INSERT INTO [ServiceJob] (
-                          [IsSystem]
-                        , [IsActive]
-                        , [Name]
-                        , [Description]
-                        , [Class]
-                        , [CronExpression]
-                        , [NotificationStatus]
-                        , [Guid]
-                    ) VALUES (
-                          0
-                        , 1
-                        , '{name}'
-                        , '{description}'
-                        , '{jobClass}'
-                        , '{cronExpression}'
-                        , 4
-                        , '{guid}'
-                    );
-                END
-                ELSE
-                BEGIN
-                    UPDATE [ServiceJob]
-                    SET [IsActive] = 1
-                        , [Name] = '{name}'
-                        , [Description] = '{description}'
-                        , [Class] = '{jobClass}'
-                        , [CronExpression] = '{cronExpression}'
-                    WHERE [Id] = @JobId;
-                END");
         }
 
         private void AddOrUpdateIISAlertTriggeredSystemCommunication()

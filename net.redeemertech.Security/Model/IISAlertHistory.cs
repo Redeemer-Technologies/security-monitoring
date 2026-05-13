@@ -29,6 +29,9 @@ namespace net.redeemertech.Security.Model
         public int ResultCount { get; set; }
 
         [DataMember]
+        public string Summary { get; set; }
+
+        [DataMember]
         public string ResultJson { get; set; }
 
         public virtual IISAlert IISAlert { get; set; }

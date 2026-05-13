@@ -11,6 +11,7 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public string Description { get; set; }
         public bool IsActive { get; set; }
         public string Query { get; set; }
+        public string SummaryLava { get; set; }
         public SlidingDateRangeBag DateRange { get; set; }
         public string NotificationEmails { get; set; }
         public int EvaluationFrequencyMinutes { get; set; }
@@ -25,6 +26,7 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 Description = alert.Description,
                 IsActive = alert.IsActive,
                 Query = alert.Query,
+                SummaryLava = alert.SummaryLava,
                 DateRange = IISLogDuckDbQuery.ToSlidingDateRangeBag(alert.DateRange.IfEmpty(IISLogDuckDbQuery.DefaultDateRange)),
                 NotificationEmails = alert.NotificationEmails,
                 EvaluationFrequencyMinutes = alert.EvaluationFrequencyMinutes < 1 ? 60 : alert.EvaluationFrequencyMinutes,

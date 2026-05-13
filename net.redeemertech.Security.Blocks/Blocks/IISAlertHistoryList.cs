@@ -39,9 +39,8 @@ namespace net.redeemertech.Security.Blocks.Blocks
             return new IISAlertsInitializationBox {
                 HistoryDetailPageUrl = this.GetLinkedPageUrl( AttributeKey.DetailPage, "IISAlertHistoryId", "((IdKey))" ),
                 Histories = query.OrderByDescending( h => h.TrippedDateTime )
-                    .Take( 500 )
                     .ToList()
-                    .Select( IISAlertHistoryBag.FromEntity )
+                    .Select( IISAlertHistoryListItemBag.FromEntity )
                     .ToList()
             };
         }

@@ -15,7 +15,7 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public string HistoryDetailPageUrl { get; set; }
         public List<IISAlertBag> Alerts { get; set; }
         public IISAlertBag Alert { get; set; }
-        public List<IISAlertHistoryBag> Histories { get; set; }
+        public List<IISAlertHistoryListItemBag> Histories { get; set; }
         public SlidingDateRangeBag DefaultDateRange { get; set; }
     }
 }

@@ -11,6 +11,7 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public string AlertName { get; set; }
         public string TrippedDateTime { get; set; }
         public int ResultCount { get; set; }
+        public string Summary { get; set; }
         public string ResultJson { get; set; }
 
         public string ErrorMessage { get; set; }
@@ -23,7 +24,9 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 IISAlertIdKey = history.IISAlert?.IdKey,
                 AlertName = history.AlertName,
                 TrippedDateTime = history.TrippedDateTime.ToString("g"),
-                ResultCount = history.ResultCount
+                ResultCount = history.ResultCount,
+                Summary = history.Summary,
+                ResultJson = history.ResultJson
             };
         }
     }

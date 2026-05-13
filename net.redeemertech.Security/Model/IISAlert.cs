@@ -30,6 +30,9 @@ namespace net.redeemertech.Security.Model
         [DataMember]
         public string Query { get; set; }
 
+        [DataMember]
+        public string SummaryLava { get; set; }
+
         [MaxLength( 100 )]
         [DataMember]
         public string DateRange { get; set; }

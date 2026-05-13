@@ -7,6 +7,8 @@ namespace net.redeemertech.Security.Migrations
     public class IISAlerts : Migration
     {
         private const string ProcessIISAlertsJobGuid = "05cb25eb-1faa-4553-8799-e3a068f042d8";
+        private const string IISAlertTriggeredSystemCommunicationGuid = "94fbe63b-5e70-4332-898a-d8031512dc82";
+        private const string ProcessIISAlertsAlertEmailAttributeGuid = "bf8e3170-4996-4754-a31d-74aac21cf1dd";
         public override void Up()
         {
             Sql( @"
@@ -18,6 +20,7 @@ namespace net.redeemertech.Security.Migrations
                         [Description] [nvarchar](max) NULL,
                         [IsActive] [bit] NOT NULL CONSTRAINT [DF__net_redeemertech_IISAlert_IsActive] DEFAULT ((1)),
                         [Query] [nvarchar](max) NOT NULL,
+                        [SummaryLava] [nvarchar](max) NULL,
                         [DateRange] [nvarchar](100) NULL,
                         [NotificationEmails] [nvarchar](max) NULL,
                         [EvaluationFrequencyMinutes] [int] NOT NULL CONSTRAINT [DF__net_redeemertech_IISAlert_EvaluationFrequencyMinutes] DEFAULT ((60)),
@@ -43,6 +46,7 @@ namespace net.redeemertech.Security.Migrations
                         [AlertName] [nvarchar](100) NOT NULL,
                         [TrippedDateTime] [datetime] NOT NULL,
                         [ResultCount] [int] NOT NULL,
+                        [Summary] [nvarchar](max) NULL,
                         [ResultJson] [nvarchar](max) NULL,
                         [CreatedDateTime] [datetime] NULL,
                         [ModifiedDateTime] [datetime] NULL,
@@ -85,7 +89,9 @@ namespace net.redeemertech.Security.Migrations
             RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.TEXT, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Parquet Folder", "Parquet Folder", @"The folder containing parquet files created by Process IIS Logs. Relative paths are resolved under App_Data.", 0, @"IISLogParquet", "111850d7-3f83-4b83-8f3a-27e8c75ea08b", "ParquetFolder");
             RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.INTEGER, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Maximum Parquet Files", "Maximum Parquet Files", @"The maximum number of parquet files to include in each alert query.", 1, @"1000", "35ed9fcb-78a2-4dee-9635-e5bc9ae3a398", "MaximumParquetFiles");
             RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.INTEGER, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Query Timeout Seconds", "Query Timeout Seconds", @"The amount of time in seconds to allow each alert query to run before timing out.", 2, @"30", "f1025648-a4e5-49a7-a008-9079d6aac649", "QueryTimeoutSeconds");
-            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.SYSTEM_COMMUNICATION, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Alert Email", "Alert Email", @"The system communication used to notify recipients when an IIS alert trips. The merge fields AlertName and AlertHistoryUrl are available.", 3, @"", "bf8e3170-4996-4754-a31d-74aac21cf1dd", "AlertEmail");
+            AddOrUpdateIISAlertTriggeredSystemCommunication();
+
+            RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.SYSTEM_COMMUNICATION, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Alert Email", "Alert Email", @"The system communication used to notify recipients when an IIS alert trips. The merge fields AlertType, AlertName, AlertDate, AlertTime, Summary, and AlertHistoryUrl are available.", 3, IISAlertTriggeredSystemCommunicationGuid, ProcessIISAlertsAlertEmailAttributeGuid, "AlertEmail");
             RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.PAGE_REFERENCE, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Alert History Detail Page", "Alert History Detail Page", @"The page that displays a single tripped alert history record.", 4, @"", "652fbada-170c-42b1-b846-614f31c7f6c8", "AlertHistoryDetailPage");
         }
 
@@ -98,6 +104,10 @@ namespace net.redeemertech.Security.Migrations
             Sql($@"
                 DELETE FROM [ServiceJob]
                 WHERE [Guid] IN ('{ProcessIISAlertsJobGuid}')");
+
+            Sql($@"
+                DELETE FROM [SystemCommunication]
+                WHERE [Guid] IN ('{IISAlertTriggeredSystemCommunicationGuid}')");
         }
 
         private void AddOrUpdateServiceJob(string guid, string name, string description, string jobClass, string cronExpression)
@@ -143,5 +153,51 @@ namespace net.redeemertech.Security.Migrations
                     WHERE [Id] = @JobId;
                 END");
         }
+
+        private void AddOrUpdateIISAlertTriggeredSystemCommunication()
+        {
+            Sql($@"
+                DECLARE @SystemCommunicationGuid uniqueidentifier = '{IISAlertTriggeredSystemCommunicationGuid}';
+                DECLARE @Title nvarchar(100) = N'IIS Alert Triggered';
+                DECLARE @Subject nvarchar(1000) = N'{{{{ AlertType }}}} Triggered: {{{{ AlertName }}}}';
+                DECLARE @Body nvarchar(max) = N'<p>An {{{{ AlertType }}}} was triggered.</p>
+<dl>
+    <dt>Alert</dt><dd>{{{{ AlertName }}}}</dd>
+    <dt>Date</dt><dd>{{{{ AlertDate }}}}</dd>
+    <dt>Time</dt><dd>{{{{ AlertTime }}}}</dd>
+    <dt>Summary</dt><dd>{{{{ Summary }}}}</dd>
+</dl>
+{{% if AlertHistoryUrl != '''' %}}<p><a href=""{{{{ AlertHistoryUrl }}}}"">View Alert History</a></p>{{% endif %}}';
+
+                IF EXISTS ( SELECT 1 FROM [SystemCommunication] WHERE [Guid] = @SystemCommunicationGuid )
+                BEGIN
+                    UPDATE [SystemCommunication]
+                    SET [IsSystem] = 0
+                        , [IsActive] = 1
+                        , [Title] = @Title
+                        , [Subject] = @Subject
+                        , [Body] = @Body
+                    WHERE [Guid] = @SystemCommunicationGuid;
+                END
+                ELSE
+                BEGIN
+                    INSERT INTO [SystemCommunication] (
+                          [IsSystem]
+                        , [IsActive]
+                        , [Title]
+                        , [Subject]
+                        , [Body]
+                        , [Guid]
+                    ) VALUES (
+                          0
+                        , 1
+                        , @Title
+                        , @Subject
+                        , @Body
+                        , @SystemCommunicationGuid
+                    );
+                END");
+        }
+
     }
 }

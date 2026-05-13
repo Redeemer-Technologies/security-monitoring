@@ -17,6 +17,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
     public class IISAlertDetail : RockBlockType
     {
         private const string DefaultQuery = "SELECT *\nFROM [[logs]]\nLIMIT 100";
+        private const string DefaultSummaryLava = "IIS alert returned {{ results | Size }} row(s).";
         public override string ObsidianFileUrl => "/Plugins/net_redeemertech/Security/iisAlertDetail.obs";
 
         public override object GetObsidianBlockInitialization()
@@ -59,6 +60,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
             alert.Description = bag.Description;
             alert.IsActive = bag.IsActive;
             alert.Query = bag.Query;
+            alert.SummaryLava = bag.SummaryLava;
             alert.DateRange = IISLogDuckDbQuery.ToDelimitedDateRange(bag.DateRange).IfEmpty(IISLogDuckDbQuery.DefaultDateRange);
             alert.NotificationEmails = bag.NotificationEmails;
             alert.EvaluationFrequencyMinutes = bag.EvaluationFrequencyMinutes < 1 ? 1 : bag.EvaluationFrequencyMinutes;
@@ -81,6 +83,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
             return new IISAlert {
                 IsActive = true,
                 Query = DefaultQuery,
+                SummaryLava = DefaultSummaryLava,
                 DateRange = IISLogDuckDbQuery.DefaultDateRange,
                 EvaluationFrequencyMinutes = 60
             };

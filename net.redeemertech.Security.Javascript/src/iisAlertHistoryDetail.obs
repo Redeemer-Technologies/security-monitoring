@@ -6,6 +6,7 @@
             <dl class="dl-horizontal">
                 <dt>Tripped</dt><dd>{{ history.trippedDateTime }}</dd>
                 <dt>Result Count</dt><dd>{{ history.resultCount }}</dd>
+                <dt>Summary</dt><dd>{{ history.summary || '' }}</dd>
             </dl>
 
             <Grid v-if="columns.length"
@@ -36,9 +37,9 @@
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { useConfigurationValues } from "@Obsidian/Utility/block";
     import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
-    import { IisAlertsInitializationBag } from "./ViewModels/iisAlertsInitializationBag";
+    import { IisAlertHistoryDetailBox } from "./ViewModels/iisAlertHistoryDetailBox";
 
-    const config = useConfigurationValues<IisAlertsInitializationBag>();
+    const config = useConfigurationValues<IisAlertHistoryDetailBox>();
     const history = ref(config.history ?? null);
     const errorMessage = ref(config.errorMessage ?? "");
     const rows = computed(() => parseRows(history.value?.resultJson ?? ""));

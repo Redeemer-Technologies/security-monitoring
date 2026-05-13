@@ -1,9 +1,7 @@
-export type IisAlertHistoryBag = {
+export type IisAlertHistoryListItemBag = {
     idKey?: string | null;
-    iisAlertIdKey?: string | null;
     alertName?: string | null;
     trippedDateTime?: string | null;
     resultCount: number;
     summary?: string | null;
-    resultJson?: string | null;
 };

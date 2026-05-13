@@ -4,11 +4,7 @@ using net.redeemertech.Security.Model;
 using Rock;
 using Rock.Blocks;
 
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Web;
 
 namespace net.redeemertech.Security.Blocks.Blocks
 {
@@ -28,15 +24,18 @@ namespace net.redeemertech.Security.Blocks.Blocks
 
             if (history == null)
             {
-                return new IISAlertHistoryBag { ErrorMessage = "IIS alert history was not found." };
+                return new IISAlertHistoryDetailBox { ErrorMessage = "IIS alert history was not found." };
             }
 
             if (!history.IsAuthorized(Rock.Security.Authorization.VIEW, RequestContext.CurrentPerson))
             {
-                return new IISAlertHistoryBag { ErrorMessage = "Not authorized to view IIS alert history." };
+                return new IISAlertHistoryDetailBox { ErrorMessage = "Not authorized to view IIS alert history." };
             }
 
-            return IISAlertHistoryBag.FromEntity(history);
+            return new IISAlertHistoryDetailBox
+            {
+                History = IISAlertHistoryBag.FromEntity( history )
+            };
         }
 
         private IISAlertHistory GetHistory()

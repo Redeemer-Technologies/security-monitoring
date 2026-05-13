@@ -6,6 +6,7 @@ export type IisAlertBag = {
     description?: string | null;
     isActive: boolean;
     query?: string | null;
+    summaryLava?: string | null;
     dateRange?: SlidingDateRangeBag | null;
     notificationEmails?: string | null;
     evaluationFrequencyMinutes: number;

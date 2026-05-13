@@ -2,20 +2,44 @@
     <div>
         <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
 
-        <Panel v-else title="IIS Alert Detail">
-            <TextBox v-model="alert.name" label="Name" :disabled="!isEditable" />
-            <TextBox v-model="alert.description" label="Description" textMode="multiline" :rows="3" :disabled="!isEditable" />
-            <CheckBox v-model="alert.isActive" label="Active" :disabled="!isEditable" />
+        <Panel v-else :title="alert.name || 'IIS Alert Detail'">
+            <template v-if="!isEditMode">
+                <dl class="dl-horizontal">
+                    <dt>Description</dt><dd>{{ alert.description || '' }}</dd>
+                    <dt>Active</dt><dd>{{ alert.isActive ? 'Yes' : 'No' }}</dd>
+                    <dt>Email Addresses</dt><dd>{{ alert.notificationEmails || '' }}</dd>
+                    <dt>Evaluate Every</dt><dd>{{ alert.evaluationFrequencyMinutes }} minute(s)</dd>
+                    <dt>Last Run</dt><dd>{{ alert.lastRunDateTime || 'Never' }}</dd>
+                </dl>
 
-            <h4>Query</h4>
-            <CodeEditor v-model="alert.query" label="SQL Query" help="Use [[logs]] in the FROM clause as the IIS log parquet source." mode="sql" :rows="12" :disabled="!isEditable" />
-            <SlidingDateRangePicker v-model="alert.dateRange" label="Date Range" help="Only parquet files whose filename date stamp falls within this range will be included." previewLocation="Right" :disabled="!isEditable" />
+                <h4>Query</h4>
+                <pre class="well well-sm">{{ alert.query }}</pre>
 
-            <h4>Notification</h4>
-            <TextBox v-model="alert.notificationEmails" label="Email Addresses" help="Comma-separated list of email addresses to notify when this alert trips." :disabled="!isEditable" />
-            <NumberBox v-model="alert.evaluationFrequencyMinutes" label="Evaluate Every Minutes" :minimumValue="1" :disabled="!isEditable" />
+                <h4>Summary Lava</h4>
+                <pre class="well well-sm">{{ alert.summaryLava }}</pre>
 
-            <RockButton v-if="isEditable" btnType="primary" :disabled="isSaving" @click="save">Save</RockButton>
+                <RockButton v-if="isEditable" btnType="primary" @click="edit">Edit</RockButton>
+            </template>
+
+            <template v-else>
+                <TextBox v-model="alert.name" label="Name" />
+                <TextBox v-model="alert.description" label="Description" textMode="multiline" :rows="3" />
+                <CheckBox v-model="alert.isActive" label="Active" />
+
+                <h4>Query</h4>
+                <CodeEditor v-model="alert.query" label="SQL Query" help="Use [[logs]] in the FROM clause as the IIS log parquet source." mode="sql" :rows="12" />
+                <SlidingDateRangePicker v-model="alert.dateRange" label="Date Range" help="Only parquet files whose filename date stamp falls within this range will be included." previewLocation="Right" />
+
+                <h4>Summary</h4>
+                <CodeEditor v-model="alert.summaryLava" label="Summary Lava" help="Formats the alert history summary. The results merge field contains the query rows. Lava commands are disabled when this is resolved." mode="lava" :rows="8" />
+
+                <h4>Notification</h4>
+                <TextBox v-model="alert.notificationEmails" label="Email Addresses" help="Comma-separated list of email addresses to notify when this alert trips." />
+                <NumberBox v-model="alert.evaluationFrequencyMinutes" label="Evaluate Every Minutes" :minimumValue="1" />
+
+                <RockButton btnType="primary" :disabled="isSaving" @click="save">Save</RockButton>
+                <RockButton v-if="savedAlert" :disabled="isSaving" @click="cancel">Cancel</RockButton>
+            </template>
         </Panel>
     </div>
 </template>
@@ -38,9 +62,22 @@
     const config = useConfigurationValues<IisAlertsInitializationBag>();
     const invokeBlockAction = useInvokeBlockAction();
     const alert = ref<IisAlertBag>(config.alert || { isActive: true, evaluationFrequencyMinutes: 60, dateRange: config.defaultDateRange });
+    const savedAlert = ref<IisAlertBag | null>(alert.value.idKey ? { ...alert.value } : null);
     const errorMessage = ref(config.errorMessage ?? "");
     const isEditable = config.isEditable;
+    const isEditMode = ref(isEditable && !alert.value.idKey);
     const isSaving = ref(false);
+
+    function edit(): void {
+        isEditMode.value = true;
+    }
+
+    function cancel(): void {
+        if (savedAlert.value) {
+            alert.value = { ...savedAlert.value };
+            isEditMode.value = false;
+        }
+    }
 
     async function save(): Promise<void> {
         isSaving.value = true;
@@ -49,6 +86,8 @@
 
         if (result.isSuccess && result.data) {
             alert.value = result.data;
+            savedAlert.value = { ...result.data };
+            isEditMode.value = false;
         }
         else {
             errorMessage.value = result.errorMessage || "Unable to save alert.";

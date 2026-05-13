@@ -5,6 +5,7 @@ using Rock.Attribute;
 using Rock.Communication;
 using Rock.Data;
 using Rock.Jobs;
+using Rock.Lava;
 using Rock.Model;
 
 using Quartz;
@@ -24,11 +25,13 @@ namespace net.redeemertech.Security
     [TextField( "Parquet Folder", "The folder containing parquet files created by Process IIS Logs. Relative paths are resolved under App_Data.", true, "IISLogParquet", key: AttributeKey.ParquetFolder, order: 0 )]
     [IntegerField( "Maximum Parquet Files", "The maximum number of parquet files to include in each alert query.", false, 1000, key: AttributeKey.MaximumParquetFiles, order: 1 )]
     [IntegerField( "Query Timeout Seconds", "The amount of time in seconds to allow each alert query to run before timing out.", false, 10, key: AttributeKey.QueryTimeoutSeconds, order: 2 )]
-    [SystemCommunicationField( "Alert Email", "The system communication used to notify recipients when an IIS alert trips.", true, key: AttributeKey.AlertEmail, order: 3 )]
+    [SystemCommunicationField( "Alert Email", "The system communication used to notify recipients when an IIS alert trips.", true, key: AttributeKey.AlertEmail, order: 3, defaultSystemCommunicationGuid: "94fbe63b-5e70-4332-898a-d8031512dc82")]
     [LinkedPage( "Alert History Detail Page", "The page that displays a single tripped alert history record.", false, key: AttributeKey.AlertHistoryDetailPage, order: 4 )]
     [DisallowConcurrentExecution]
     public class ProcessIISAlerts : RockJob
     {
+        private const string DefaultSummaryLava = "IIS alert returned {{ results | Size }} row(s).";
+
         private static class AttributeKey
         {
             public const string ParquetFolder = "ParquetFolder";
@@ -80,12 +83,14 @@ namespace net.redeemertech.Security
 
                         if (resultTable.Rows.Count > 0)
                         {
+                            var summary = ResolveSummary( alert, resultTable );
                             var history = new IISAlertHistory
                             {
                                 IISAlertId = alert.Id,
                                 AlertName = alert.Name,
                                 TrippedDateTime = now,
                                 ResultCount = resultTable.Rows.Count,
+                                Summary = summary,
                                 ResultJson = SerializeResults(resultTable)
                             };
 
@@ -132,6 +137,10 @@ namespace net.redeemertech.Security
 
             var mergeFields = Rock.Lava.LavaHelper.GetCommonMergeFields( null );
             mergeFields.AddOrReplace( "AlertName", alert.Name );
+            mergeFields.AddOrReplace( "AlertType", "IIS Alert" );
+            mergeFields.AddOrReplace( "AlertDate", history.TrippedDateTime.ToShortDateString() );
+            mergeFields.AddOrReplace( "AlertTime", history.TrippedDateTime.ToShortTimeString() );
+            mergeFields.AddOrReplace( "Summary", history.Summary );
             mergeFields.AddOrReplace( "AlertHistoryUrl", GetAlertHistoryUrl( history.Id ) );
 
             var emailMessage = new RockEmailMessage( systemCommunicationGuid.Value );
@@ -176,6 +185,67 @@ namespace net.redeemertech.Security
             }
 
             return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize( rows );
+        }
+
+        private static string ResolveSummary( IISAlert alert, DataTable table )
+        {
+            var mergeFields = new Dictionary<string, object>
+            {
+                { "results", GetLavaResults( table ) }
+            };
+
+            var template = alert.SummaryLava.IfEmpty( DefaultSummaryLava );
+
+            // Do not enable Lava commands here; the summary can only format the in-memory query results.
+            return template.ResolveMergeFields( mergeFields, string.Empty );
+        }
+
+        private static List<object> GetLavaResults( DataTable table )
+        {
+            var rows = new List<object>();
+            foreach ( DataRow row in table.Rows )
+            {
+                rows.Add( new LavaResultRow( row ) );
+            }
+
+            return rows;
+        }
+
+        private class LavaResultRow : LavaDataObject
+        {
+            private readonly DataRow _dataRow;
+
+            public LavaResultRow( DataRow dataRow )
+            {
+                _dataRow = dataRow;
+            }
+
+            [LavaVisible]
+            public override List<string> AvailableKeys
+            {
+                get
+                {
+                    var keys = new List<string>();
+                    foreach ( DataColumn column in _dataRow.Table.Columns )
+                    {
+                        keys.Add( column.ColumnName );
+                    }
+
+                    return keys;
+                }
+            }
+
+            protected override bool OnTryGetValue( string key, out object result )
+            {
+                if ( _dataRow.Table.Columns.Contains( key ) )
+                {
+                    var value = _dataRow[key];
+                    result = value == DBNull.Value ? null : value;
+                    return true;
+                }
+
+                return base.OnTryGetValue( key, out result );
+            }
         }
     }
 }

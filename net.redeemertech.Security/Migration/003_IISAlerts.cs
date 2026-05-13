@@ -88,6 +88,7 @@ namespace net.redeemertech.Security.Migrations
             //  Internal Name: Alerts
             //  Site: Rock RMS
             RockMigrationHelper.AddPage(true, "FA5D74A9-EC66-45E3-9149-BE75B33C09AD", "22D220B5-0D34-429A-B9E3-59D80AE423E7", "Alerts", "", "8381E992-47CB-472C-823A-51B2FBC87F7F", "");
+            Sql("UPDATE [Page] SET [DisplayInNavWhen] = 2 WHERE [Guid] = '8381E992-47CB-472C-823A-51B2FBC87F7F'");
 
             // Add Page 
             //  Internal Name: Alert Detail
@@ -144,7 +145,7 @@ namespace net.redeemertech.Security.Migrations
             RockMigrationHelper.AddBlock(true, "FA5D74A9-EC66-45E3-9149-BE75B33C09AD".AsGuid(), null, "C2D29296-6A87-47A9-A753-EE4E9159C4C4".AsGuid(), "19B61D65-37E3-459F-A44F-DEF0089118A3".AsGuid(), "HTML Content", "Sidebar1", @"", @"", 0, "CFBEF7C0-6948-461A-9CEF-E5DE16756EF4");
 
             // Add/Update HtmlContent for Block: HTML Content
-            RockMigrationHelper.UpdateHtmlContentBlock("CFBEF7C0-6948-461A-9CEF-E5DE16756EF4", $@"<a class=""btn btn-default btn-block mb-4"" href=""/page/{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '1eb38156-8e6e-4d62-b7a0-6a3313b938b1'").ToStringSafe()}""><i class=""fa fa-bell""></i> Alerts</a>", "1CECC2DC-745C-4EC4-97DF-5B196A700F6B");
+            RockMigrationHelper.UpdateHtmlContentBlock("CFBEF7C0-6948-461A-9CEF-E5DE16756EF4", $@"<a class=""btn btn-default btn-block mb-4"" href=""/page/{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '8381E992-47CB-472C-823A-51B2FBC87F7F'").ToStringSafe()}""><i class=""fa fa-bell""></i> Alerts</a>", "1CECC2DC-745C-4EC4-97DF-5B196A700F6B");
 
             // Update Order for Page: IIS Analytics,  Zone: Sidebar1,  Block: HTML Content
             Sql(@"UPDATE [Block] SET [Order] = 0 WHERE [Guid] = 'CFBEF7C0-6948-461A-9CEF-E5DE16756EF4'");

@@ -60,6 +60,7 @@ namespace net.redeemertech.Security
     {
         private const string StateFileName = "iis-log-parquet-state.json";
         private const string DefaultSummaryLava = "IIS alert returned {{ results | Size }} row(s).";
+        private const string AlertQueryEnabledLavaCommands = "Sql";
 
         private static readonly Encoding Utf8NoBom = new UTF8Encoding( false );
 
@@ -202,8 +203,9 @@ namespace net.redeemertech.Security
                     result.EvaluatedCount++;
                     try
                     {
+                        var resolvedQuery = ResolveAlertQuery( alert );
                         var resultTable = new IISLogDuckDbQuery().Execute(
-                            alert.Query,
+                            resolvedQuery,
                             alert.DateRange,
                             defaultParquetFolder,
                             defaultMaximumParquetFiles,
@@ -242,6 +244,14 @@ namespace net.redeemertech.Security
 
                 return result;
             }
+        }
+
+        private static string ResolveAlertQuery( IISAlert alert )
+        {
+            var mergeFields = Rock.Lava.LavaHelper.GetCommonMergeFields( null );
+            mergeFields.AddOrReplace( "Alert", alert );
+
+            return alert.Query.ResolveMergeFields( mergeFields, AlertQueryEnabledLavaCommands );
         }
 
         private static bool ShouldEvaluate( IISAlert alert, DateTime now )

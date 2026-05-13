@@ -1,7 +1,9 @@
 using DuckDB.NET.Data;
 
 using Rock;
+using Rock.Data;
 using Rock.Enums.Controls;
+using Rock.Model;
 using Rock.ViewModels.Controls;
 
 using System;
@@ -18,6 +20,7 @@ namespace net.redeemertech.Security
     {
         public const string LogsPlaceholder = "[[logs]]";
         public const string DefaultDateRange = "Last|7|Day||";
+        private const string ImpersonationTokenTableName = "__impersonation_tokens";
 
         public DataTable Execute( string query, string dateRange, string parquetFolder, int maximumParquetFiles, int timeoutSeconds )
         {
@@ -26,17 +29,28 @@ namespace net.redeemertech.Security
 
         public DataTable Execute( string query, string dateRange, string parquetFolder, int maximumParquetFiles, int timeoutSeconds, bool loadRows, Dictionary<string, object> sqlParameters )
         {
-            var preparedQuery = PrepareQuery( query, dateRange, parquetFolder, maximumParquetFiles );
-            return ExecutePreparedQuery( preparedQuery, timeoutSeconds, loadRows, sqlParameters );
+            var preparedQuery = PrepareQueryParts( query, dateRange, parquetFolder, maximumParquetFiles );
+            return ExecutePreparedQuery( preparedQuery.Query, timeoutSeconds, loadRows, sqlParameters, preparedQuery.RawLogsSql );
         }
 
         public DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows = true, Dictionary<string, object> sqlParameters = null )
+        {
+            return ExecutePreparedQuery( preparedQuery, timeoutSeconds, loadRows, sqlParameters, null );
+        }
+
+        private DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows, Dictionary<string, object> sqlParameters, string rawLogsSql )
         {
             var sql = loadRows ? preparedQuery : "SELECT * FROM (" + preparedQuery + ") __log_query_schema LIMIT 0";
 
             using ( var connection = new DuckDBConnection( "Data Source=:memory:" ) )
             {
                 connection.Open();
+                CreateImpersonationTokenTable( connection );
+                if ( loadRows )
+                {
+                    PopulateImpersonationTokenTable( connection, rawLogsSql );
+                }
+
                 using ( var command = connection.CreateCommand() )
                 {
                     command.CommandText = sql;
@@ -52,6 +66,11 @@ namespace net.redeemertech.Security
         }
 
         public string PrepareQuery( string query, string dateRange, string parquetFolder, int maximumParquetFiles )
+        {
+            return PrepareQueryParts( query, dateRange, parquetFolder, maximumParquetFiles ).Query;
+        }
+
+        private PreparedQuery PrepareQueryParts( string query, string dateRange, string parquetFolder, int maximumParquetFiles )
         {
             query = NormalizeQuery( query );
             if ( !query.Contains( LogsPlaceholder ) )
@@ -77,8 +96,13 @@ namespace net.redeemertech.Security
             }
 
             var fileList = "[" + parquetFiles.Select( f => "'" + EscapeSqlString( f ) + "'" ).JoinStrings( "," ) + "]";
-            var logsFromSql = "( SELECT CAST(NULL AS BIGINT) AS \"sc-bytes\", CAST(NULL AS VARCHAR) AS \"cs-host\" WHERE 1 = 0 UNION ALL BY NAME SELECT * FROM read_parquet(" + fileList + ", union_by_name = true) )";
-            return query.Replace( LogsPlaceholder, logsFromSql );
+            var rawLogsSql = GetRawLogsSql( fileList );
+            var logsFromSql = "( SELECT __logs.*, __tokens.impersonated_person_id FROM " + rawLogsSql + " __logs LEFT JOIN " + ImpersonationTokenTableName + " __tokens ON __logs.\"cs-username\" = __tokens.cs_username )";
+            return new PreparedQuery
+            {
+                Query = query.Replace( LogsPlaceholder, logsFromSql ),
+                RawLogsSql = rawLogsSql
+            };
         }
 
         public List<string> GetParquetFiles( string dateRange, string parquetFolder, int maximumParquetFiles )
@@ -168,6 +192,99 @@ namespace net.redeemertech.Security
                 parameter.Value = sqlParameter.Value ?? DBNull.Value;
                 command.Parameters.Add( parameter );
             }
+        }
+
+        private void PopulateImpersonationTokenTable( DuckDBConnection connection, string rawLogsSql )
+        {
+            if ( rawLogsSql.IsNullOrWhiteSpace() )
+            {
+                return;
+            }
+
+            var impersonationUserNames = GetImpersonationUserNames( connection, rawLogsSql );
+            foreach ( var userName in impersonationUserNames )
+            {
+                var personId = ResolveImpersonatedPersonId( userName );
+                if ( !personId.HasValue )
+                {
+                    continue;
+                }
+
+                using ( var command = connection.CreateCommand() )
+                {
+                    command.CommandText = "INSERT INTO " + ImpersonationTokenTableName + " (cs_username, impersonated_person_id) VALUES ($cs_username, $impersonated_person_id)";
+
+                    var userNameParameter = command.CreateParameter();
+                    userNameParameter.ParameterName = "cs_username";
+                    userNameParameter.Value = userName;
+                    command.Parameters.Add( userNameParameter );
+
+                    var personIdParameter = command.CreateParameter();
+                    personIdParameter.ParameterName = "impersonated_person_id";
+                    personIdParameter.Value = personId.Value;
+                    command.Parameters.Add( personIdParameter );
+
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+        protected virtual int? ResolveImpersonatedPersonId( string csUserName )
+        {
+            var impersonationToken = GetImpersonationToken( csUserName );
+            if ( impersonationToken.IsNullOrWhiteSpace() )
+            {
+                return null;
+            }
+
+            using ( var rockContext = new RockContext() )
+            {
+                var personToken = new PersonTokenService( rockContext ).GetByImpersonationToken( impersonationToken );
+                return personToken?.PersonAlias?.PersonId;
+            }
+        }
+
+        private static List<string> GetImpersonationUserNames( DuckDBConnection connection, string rawLogsSql )
+        {
+            var userNames = new List<string>();
+            using ( var command = connection.CreateCommand() )
+            {
+                command.CommandText = "SELECT DISTINCT \"cs-username\" FROM " + rawLogsSql + " __logs WHERE \"cs-username\" LIKE 'rckipid=%'";
+                using ( var reader = command.ExecuteReader() )
+                {
+                    while ( reader.Read() )
+                    {
+                        if ( !reader.IsDBNull( 0 ) )
+                        {
+                            userNames.Add( reader.GetString( 0 ) );
+                        }
+                    }
+                }
+            }
+
+            return userNames;
+        }
+
+        private static void CreateImpersonationTokenTable( DuckDBConnection connection )
+        {
+            using ( var command = connection.CreateCommand() )
+            {
+                command.CommandText = "CREATE TEMP TABLE " + ImpersonationTokenTableName + " (cs_username VARCHAR, impersonated_person_id INTEGER)";
+                command.ExecuteNonQuery();
+            }
+        }
+
+        private static string GetImpersonationToken( string csUserName )
+        {
+            const string prefix = "rckipid=";
+            return csUserName != null && csUserName.StartsWith( prefix, StringComparison.OrdinalIgnoreCase )
+                ? csUserName.Substring( prefix.Length )
+                : null;
+        }
+
+        private static string GetRawLogsSql( string fileList )
+        {
+            return "( SELECT CAST(NULL AS BIGINT) AS \"sc-bytes\", CAST(NULL AS VARCHAR) AS \"cs-host\", CAST(NULL AS VARCHAR) AS \"cs-username\" WHERE 1 = 0 UNION ALL BY NAME SELECT * FROM read_parquet(" + fileList + ", union_by_name = true) )";
         }
 
         private static DataTable LoadDataTable( IDataReader reader )
@@ -325,6 +442,13 @@ namespace net.redeemertech.Security
         private static string EscapeSqlString( string value )
         {
             return value.Replace( "'", "''" );
+        }
+
+        private class PreparedQuery
+        {
+            public string Query { get; set; }
+
+            public string RawLogsSql { get; set; }
         }
     }
 }

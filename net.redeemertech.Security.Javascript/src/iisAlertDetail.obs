@@ -1,0 +1,57 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <Panel v-else title="IIS Alert Detail">
+            <TextBox v-model="alert.name" label="Name" :disabled="!isEditable" />
+            <TextBox v-model="alert.description" label="Description" textMode="multiline" :rows="3" :disabled="!isEditable" />
+            <CheckBox v-model="alert.isActive" label="Active" :disabled="!isEditable" />
+
+            <h4>Query</h4>
+            <CodeEditor v-model="alert.query" label="SQL Query" help="Use [[logs]] in the FROM clause as the IIS log parquet source." mode="sql" :rows="12" :disabled="!isEditable" />
+            <SlidingDateRangePicker v-model="alert.dateRange" label="Date Range" help="Only parquet files whose filename date stamp falls within this range will be included." previewLocation="Right" :disabled="!isEditable" />
+
+            <h4>Notification</h4>
+            <TextBox v-model="alert.notificationEmails" label="Email Addresses" help="Comma-separated list of email addresses to notify when this alert trips." :disabled="!isEditable" />
+            <NumberBox v-model="alert.evaluationFrequencyMinutes" label="Evaluate Every Minutes" :minimumValue="1" :disabled="!isEditable" />
+
+            <RockButton v-if="isEditable" btnType="primary" :disabled="isSaving" @click="save">Save</RockButton>
+        </Panel>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { ref } from "vue";
+    import CheckBox from "@Obsidian/Controls/checkBox.obs";
+    import CodeEditor from "@Obsidian/Controls/codeEditor.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import NumberBox from "@Obsidian/Controls/numberBox.obs";
+    import Panel from "@Obsidian/Controls/panel.obs";
+    import RockButton from "@Obsidian/Controls/rockButton.obs";
+    import SlidingDateRangePicker from "@Obsidian/Controls/slidingDateRangePicker.obs";
+    import TextBox from "@Obsidian/Controls/textBox.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
+    import { IisAlertBag } from "./ViewModels/iisAlertBag";
+    import { IisAlertsInitializationBag } from "./ViewModels/iisAlertsInitializationBag";
+
+    const config = useConfigurationValues<IisAlertsInitializationBag>();
+    const invokeBlockAction = useInvokeBlockAction();
+    const alert = ref<IisAlertBag>(config.alert || { isActive: true, evaluationFrequencyMinutes: 60, dateRange: config.defaultDateRange });
+    const errorMessage = ref(config.errorMessage ?? "");
+    const isEditable = config.isEditable;
+    const isSaving = ref(false);
+
+    async function save(): Promise<void> {
+        isSaving.value = true;
+        const result = await invokeBlockAction<IisAlertBag>("SaveAlert", { bag: alert.value });
+        isSaving.value = false;
+
+        if (result.isSuccess && result.data) {
+            alert.value = result.data;
+        }
+        else {
+            errorMessage.value = result.errorMessage || "Unable to save alert.";
+        }
+    }
+</script>

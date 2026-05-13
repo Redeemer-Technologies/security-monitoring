@@ -1,0 +1,98 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <Grid v-else
+              title="IIS Alerts"
+              :data="gridDataSource"
+              keyField="idKey"
+              itemTerm="IIS Alert"
+              tooltipField="name"
+              stickyHeader
+              :onAddItem="isEditable ? goToNewAlert : undefined"
+              @selectItem="goToAlert">
+            <Column name="name"
+                    title="Name"
+                    sortValue="{{ row.name }} {{ row.description }}"
+                    filterValue="{{ row.name }} {{ row.description }}"
+                    quickFilterValue="{{ row.name }} {{ row.description }}"
+                    :filter="textValueFilter"
+                    width="45%">
+                <template #format="{ row }">
+                    <strong>{{ row.name }}</strong>
+                    <div class="text-muted">{{ row.description }}</div>
+                </template>
+            </Column>
+
+            <BooleanColumn name="isActive"
+                           title="Active"
+                           field="isActive"
+                           :filter="booleanValueFilter"
+                           visiblePriority="xs"
+                           width="10%" />
+
+            <NumberColumn name="evaluationFrequencyMinutes"
+                          title="Frequency Minutes"
+                          field="evaluationFrequencyMinutes"
+                          visiblePriority="sm"
+                          width="15%" />
+
+            <TextColumn name="lastRunDateTime"
+                        title="Last Run"
+                        field="lastRunDateTime"
+                        :filter="textValueFilter"
+                        visiblePriority="sm"
+                        width="20%" />
+
+            <DeleteColumn v-if="isEditable" @click="deleteAlert" />
+        </Grid>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { computed, ref } from "vue";
+    import Grid, { BooleanColumn, Column, DeleteColumn, NumberColumn, TextColumn, booleanValueFilter, textValueFilter } from "@Obsidian/Controls/grid";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { IisAlertBag } from "./ViewModels/iisAlertBag";
+    import { IisAlertsInitializationBag } from "./ViewModels/iisAlertsInitializationBag";
+
+    const config = useConfigurationValues<IisAlertsInitializationBag>();
+    const invokeBlockAction = useInvokeBlockAction();
+    const reloadBlock = useReloadBlock();
+    const alerts = ref(config.alerts ?? []);
+    const errorMessage = ref(config.errorMessage ?? "");
+    const isEditable = config.isEditable;
+    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: alerts.value as Record<string, unknown>[] }));
+
+    function buildUrl(template: string | null | undefined, idKey: string): string {
+        return (template || "").replace("((IdKey))", encodeURIComponent(idKey));
+    }
+
+    function goToAlert(idKey: string): void {
+        if (idKey) {
+            window.location.href = buildUrl(config.detailPageUrl, idKey);
+        }
+    }
+
+    function goToNewAlert(): void {
+        window.location.href = buildUrl(config.detailPageUrl, "0");
+    }
+
+    async function deleteAlert(idKey: string): Promise<void> {
+        const alert = alerts.value.find(a => a.idKey === idKey);
+        if (!idKey || !confirm(`Delete ${alert?.name || "this alert"}?`)) {
+            return;
+        }
+
+        const result = await invokeBlockAction("DeleteAlert", { idKey });
+        if (result.isSuccess) {
+            reloadBlock();
+        }
+        else {
+            errorMessage.value = result.errorMessage || "Unable to delete alert.";
+        }
+    }
+</script>

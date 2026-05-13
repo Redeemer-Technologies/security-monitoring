@@ -1,0 +1,75 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <Panel v-else-if="history" :title="history.alertName || 'IIS Alert History'">
+            <dl class="dl-horizontal">
+                <dt>Tripped</dt><dd>{{ history.trippedDateTime }}</dd>
+                <dt>Result Count</dt><dd>{{ history.resultCount }}</dd>
+            </dl>
+
+            <Grid v-if="columns.length"
+                  title="Results"
+                  :data="gridDataSource"
+                  keyField="uniqueKey"
+                  itemTerm="Result"
+                  stickyHeader>
+                <TextColumn v-for="column in columns"
+                            :key="column"
+                            :name="column"
+                            :title="column"
+                            :field="column"
+                            :filter="textValueFilter"
+                            visiblePriority="xs" />
+            </Grid>
+
+            <NotificationBox v-else :alertType="AlertType.Info">No result rows were saved.</NotificationBox>
+        </Panel>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { computed, ref } from "vue";
+    import Grid, { TextColumn, textValueFilter } from "@Obsidian/Controls/grid";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import Panel from "@Obsidian/Controls/panel.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues } from "@Obsidian/Utility/block";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { IisAlertsInitializationBag } from "./ViewModels/iisAlertsInitializationBag";
+
+    const config = useConfigurationValues<IisAlertsInitializationBag>();
+    const history = ref(config.history ?? null);
+    const errorMessage = ref(config.errorMessage ?? "");
+    const rows = computed(() => parseRows(history.value?.resultJson ?? ""));
+    const columns = computed(() => rows.value.length ? Object.keys(rows.value[0]) : []);
+    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: rows.value }));
+
+    function parseRows(json: string): Record<string, string>[] {
+        if (!json) {
+            return [];
+        }
+
+        try {
+            const parsed = JSON.parse(json);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+
+            return parsed.map((row, index) => {
+                const values: Record<string, string> = { uniqueKey: String(index) };
+                if (row && typeof row === "object" && !Array.isArray(row)) {
+                    Object.keys(row).forEach(key => {
+                        const value = row[key];
+                        values[key] = value === null || value === undefined ? "" : String(value);
+                    });
+                }
+
+                return values;
+            });
+        }
+        catch {
+            return [];
+        }
+    }
+</script>

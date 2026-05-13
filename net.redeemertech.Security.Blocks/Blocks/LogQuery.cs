@@ -38,7 +38,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
     [TextField( "Parquet Folder",
         "The folder containing parquet files created by Process IIS Logs. Relative paths are resolved under App_Data.",
         true,
-        "IisLogParquet",
+        "IISLogParquet",
         key: AttributeKey.ParquetFolder,
         order: 0 )]
     [IntegerField( "Maximum Parquet Files",
@@ -696,7 +696,7 @@ LIMIT 100";
             var configuredFolder = GetAttributeValue( AttributeKey.ParquetFolder );
             if ( configuredFolder.IsNullOrWhiteSpace() )
             {
-                configuredFolder = "IisLogParquet";
+                configuredFolder = "IISLogParquet";
             }
 
             configuredFolder = Environment.ExpandEnvironmentVariables( configuredFolder );

@@ -1,0 +1,54 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <Grid v-else
+              title="IIS Alert History"
+              :data="gridDataSource"
+              keyField="idKey"
+              itemTerm="IIS Alert History"
+              tooltipField="alertName"
+              stickyHeader
+              @selectItem="goToHistory">
+            <TextColumn name="alertName"
+                        title="Alert"
+                        field="alertName"
+                        :filter="textValueFilter"
+                        width="50%" />
+
+            <TextColumn name="trippedDateTime"
+                        title="Tripped"
+                        field="trippedDateTime"
+                        :filter="textValueFilter"
+                        visiblePriority="sm"
+                        width="30%" />
+
+            <NumberColumn name="resultCount"
+                          title="Rows"
+                          field="resultCount"
+                          visiblePriority="xs"
+                          width="20%" />
+        </Grid>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { computed, ref } from "vue";
+    import Grid, { NumberColumn, TextColumn, textValueFilter } from "@Obsidian/Controls/grid";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues } from "@Obsidian/Utility/block";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { IisAlertsInitializationBag } from "./ViewModels/iisAlertsInitializationBag";
+
+    const config = useConfigurationValues<IisAlertsInitializationBag>();
+    const histories = ref(config.histories ?? []);
+    const errorMessage = ref(config.errorMessage ?? "");
+    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: histories.value as Record<string, unknown>[] }));
+
+    function goToHistory(idKey: string): void {
+        if (idKey) {
+            window.location.href = (config.historyDetailPageUrl || "").replace("((IdKey))", encodeURIComponent(idKey));
+        }
+    }
+</script>

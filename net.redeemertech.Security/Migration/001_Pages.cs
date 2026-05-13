@@ -190,7 +190,7 @@ namespace net.redeemertech.Security.Migrations
             //   BlockType: Log Query
             //   Category: net_redeemertech > Security
             //   Attribute: Parquet Folder
-            RockMigrationHelper.AddOrUpdateBlockTypeAttribute("46a5cc4c-673a-46e3-b100-98104dcc0539", "9C204CD0-1233-41C5-818A-C5DA439445AA", "Parquet Folder", "ParquetFolder", "Parquet Folder", @"The folder containing parquet files created by Process IIS Logs. Relative paths are resolved under App_Data.", 0, @"IisLogParquet", "77990981-11EF-4E5B-9639-B98A6772EDCB");
+            RockMigrationHelper.AddOrUpdateBlockTypeAttribute("46a5cc4c-673a-46e3-b100-98104dcc0539", "9C204CD0-1233-41C5-818A-C5DA439445AA", "Parquet Folder", "ParquetFolder", "Parquet Folder", @"The folder containing parquet files created by Process IIS Logs. Relative paths are resolved under App_Data.", 0, @"IISLogParquet", "77990981-11EF-4E5B-9639-B98A6772EDCB");
 
             // Attribute for BlockType
             //   BlockType: Log Query
@@ -311,8 +311,8 @@ LIMIT 100");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=IIS Log Query, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("C9244478-AA69-458A-8CE9-471B229705EE", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("C9244478-AA69-458A-8CE9-471B229705EE", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -492,8 +492,8 @@ ORDER BY date DESC, daily_active_users DESC, ""cs-host"";");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=Daily Active Users By Domain, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("E25D414D-AEA5-4E9A-B3E1-F1CCBC3601E1", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("E25D414D-AEA5-4E9A-B3E1-F1CCBC3601E1", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -537,8 +537,8 @@ LIMIT 100;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=Top URLs, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("265D8CBE-4AE6-456F-924A-6F571037F324", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("265D8CBE-4AE6-456F-924A-6F571037F324", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -744,8 +744,8 @@ ORDER BY error_count DESC;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=Error Pages/404s, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("2034E874-D57F-4352-BFDA-DEE1EE8CB660", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("2034E874-D57F-4352-BFDA-DEE1EE8CB660", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -753,8 +753,8 @@ ORDER BY error_count DESC;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=Traffic by User, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("08C5EDFB-D809-4B3F-9EF0-BABFEB1637DA", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("08C5EDFB-D809-4B3F-9EF0-BABFEB1637DA", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -1067,8 +1067,8 @@ ORDER BY log_date ASC;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=IIS Analytics, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("411FACDE-72BF-4670-835C-1350291BAE38", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("411FACDE-72BF-4670-835C-1350291BAE38", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Data Egress
@@ -1076,8 +1076,8 @@ ORDER BY log_date ASC;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=IIS Analytics, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("DB4EDD2D-D3B9-4349-9F3A-69ADD8FCC403", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("DB4EDD2D-D3B9-4349-9F3A-69ADD8FCC403", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Data Egress
@@ -1441,8 +1441,8 @@ ORDER BY log_date ASC;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=IIS Analytics, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("A7BBF719-610C-4FF0-AEC8-68D740BDCAA3", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("A7BBF719-610C-4FF0-AEC8-68D740BDCAA3", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Page Menu
@@ -1546,8 +1546,8 @@ ORDER BY log_date ASC;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=IIS Analytics, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("679B1693-3A8C-4209-BE43-EFD0B30E3948", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("679B1693-3A8C-4209-BE43-EFD0B30E3948", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Top users
@@ -1771,8 +1771,8 @@ LIMIT 5;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=IIS Analytics, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("061D2970-370E-4FF0-A8DF-392FA7B2126F", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("061D2970-370E-4FF0-A8DF-392FA7B2126F", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -1780,8 +1780,8 @@ LIMIT 5;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=Specific User, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("9F630E83-6590-4F4F-A5BB-629EDCA84639", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("9F630E83-6590-4F4F-A5BB-629EDCA84639", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -1997,8 +1997,8 @@ LIMIT 1000;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=Specific Page, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("177D8EB6-54E1-427E-BDAF-C01C15DB011E", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("177D8EB6-54E1-427E-BDAF-C01C15DB011E", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query
@@ -2006,8 +2006,8 @@ LIMIT 1000;");
             //   Category: net_redeemertech > Security
             //   Block Location: Page=Specific Page, Site=Rock RMS
             //   Attribute: Parquet Folder
-            /*   Attribute Value: IisLogParquet */
-            RockMigrationHelper.AddBlockAttributeValue("00F2C59C-B218-45E7-8A4E-C1AC49D67127", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IisLogParquet");
+            /*   Attribute Value: IISLogParquet */
+            RockMigrationHelper.AddBlockAttributeValue("00F2C59C-B218-45E7-8A4E-C1AC49D67127", "77990981-11EF-4E5B-9639-B98A6772EDCB", @"IISLogParquet");
 
             // Add Block Attribute Value
             //   Block: Log Query

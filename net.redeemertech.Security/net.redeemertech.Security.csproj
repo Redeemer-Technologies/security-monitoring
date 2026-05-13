@@ -88,16 +88,24 @@
     <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=6.0.1.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>..\Rock\packages\System.Runtime.CompilerServices.Unsafe.6.1.0\lib\net462\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
     </Reference>
+    <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Web" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Xml.Linq" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="IISLogDuckDbQuery.cs" />
+    <Compile Include="Jobs\ProcessIISAlerts.cs" />
     <Compile Include="Jobs\ProcessIISLogs.cs" />
     <Compile Include="Jobs\SecurityAudit.cs" />
     <Compile Include="Migration\001_Pages.cs" />
     <Compile Include="Migration\002_Jobs.cs" />
+    <Compile Include="Migration\003_IISAlerts.cs" />
+    <Compile Include="Model\IISAlert.cs" />
+    <Compile Include="Model\IISAlertHistory.cs" />
+    <Compile Include="Model\IISAlertHistoryService.cs" />
+    <Compile Include="Model\IISAlertService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -120,6 +128,10 @@
     <ProjectReference Include="..\Rock\Rock.Version\Rock.Version.csproj">
       <Project>{6FE0930C-6832-4C2F-8A76-D4E4A2D80DDF}</Project>
       <Name>Rock.Version</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Rock\Rock.ViewModels\Rock.ViewModels.csproj">
+      <Project>{05BAAF85-9C53-4CCD-A535-036427B0DF72}</Project>
+      <Name>Rock.ViewModels</Name>
     </ProjectReference>
     <ProjectReference Include="..\Rock\Rock\Rock.csproj">
       <Project>{185a31d7-3037-4dae-8797-0459849a84bd}</Project>

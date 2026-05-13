@@ -93,6 +93,95 @@ namespace net.redeemertech.Security.Migrations
 
             RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.SYSTEM_COMMUNICATION, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Alert Email", "Alert Email", @"The system communication used to notify recipients when an IIS alert trips. The merge fields AlertType, AlertName, AlertDate, AlertTime, Summary, and AlertHistoryUrl are available.", 3, IISAlertTriggeredSystemCommunicationGuid, ProcessIISAlertsAlertEmailAttributeGuid, "AlertEmail");
             RockMigrationHelper.AddOrUpdateEntityAttribute("Rock.Model.ServiceJob", Rock.SystemGuid.FieldType.PAGE_REFERENCE, "Class", "net.redeemertech.Security.ProcessIISAlerts", "Alert History Detail Page", "Alert History Detail Page", @"The page that displays a single tripped alert history record.", 4, @"", "652fbada-170c-42b1-b846-614f31c7f6c8", "AlertHistoryDetailPage");
+
+            // Add Page 
+            //  Internal Name: Alerts
+            //  Site: Rock RMS
+            RockMigrationHelper.AddPage(true, "FA5D74A9-EC66-45E3-9149-BE75B33C09AD", "22D220B5-0D34-429A-B9E3-59D80AE423E7", "Alerts", "", "8381E992-47CB-472C-823A-51B2FBC87F7F", "");
+
+            // Add Page 
+            //  Internal Name: Alert Detail
+            //  Site: Rock RMS
+            RockMigrationHelper.AddPage(true, "8381E992-47CB-472C-823A-51B2FBC87F7F", "22D220B5-0D34-429A-B9E3-59D80AE423E7", "Alert Detail", "", "524EF496-663F-40F7-B990-F0548D27FBD9", "");
+
+            // Add Page 
+            //  Internal Name: IIS Alert Details
+            //  Site: Rock RMS
+            RockMigrationHelper.AddPage(true, "524EF496-663F-40F7-B990-F0548D27FBD9", "D65F783D-87A9-4CC9-8110-E83466A0EADB", "IIS Alert Details", "", "D422AFE0-0E4F-4D3B-9C31-B209D11BE4F9", "");
+
+            // Add Block 
+            //  Block Name: IIS Alert List
+            //  Page Name: Alerts
+            //  Layout: -
+            //  Site: Rock RMS
+            RockMigrationHelper.AddBlock(true, "8381E992-47CB-472C-823A-51B2FBC87F7F".AsGuid(), null, "C2D29296-6A87-47A9-A753-EE4E9159C4C4".AsGuid(), "49531C16-1F93-49D9-BCAB-9E7FD889E1BF".AsGuid(), "IIS Alert List", "Main", @"", @"", 0, "E2FECEFB-EF53-4827-A224-F910A485AF52");
+
+            // Add Block 
+            //  Block Name: IIS Alert Detail
+            //  Page Name: Alert Detail
+            //  Layout: -
+            //  Site: Rock RMS
+            RockMigrationHelper.AddBlock(true, "524EF496-663F-40F7-B990-F0548D27FBD9".AsGuid(), null, "C2D29296-6A87-47A9-A753-EE4E9159C4C4".AsGuid(), "C8032B08-FC23-479D-90D3-9DDF049A6A3C".AsGuid(), "IIS Alert Detail", "Main", @"", @"", 0, "3A453580-49BD-4D16-943B-07CF98ACEEFB");
+
+            // Add Block 
+            //  Block Name: IIS Alert History List
+            //  Page Name: Alert Detail
+            //  Layout: -
+            //  Site: Rock RMS
+            RockMigrationHelper.AddBlock(true, "524EF496-663F-40F7-B990-F0548D27FBD9".AsGuid(), null, "C2D29296-6A87-47A9-A753-EE4E9159C4C4".AsGuid(), "655CA478-FDCF-4996-901C-6011B485E52B".AsGuid(), "IIS Alert History List", "Main", @"", @"", 1, "28642E24-EE66-4810-82D2-503DA4B5561C");
+
+            // Add Block 
+            //  Block Name: IIS Alert History Detail
+            //  Page Name: IIS Alert Details
+            //  Layout: -
+            //  Site: Rock RMS
+            RockMigrationHelper.AddBlock(true, "D422AFE0-0E4F-4D3B-9C31-B209D11BE4F9".AsGuid(), null, "C2D29296-6A87-47A9-A753-EE4E9159C4C4".AsGuid(), "DA59B549-4345-408C-B5F7-5680328B46E7".AsGuid(), "IIS Alert History Detail", "Main", @"", @"", 0, "20FBEDA7-3028-4924-B29A-B445CF6CAEAE");
+
+            // update block order for pages with new blocks if the page,zone has multiple blocks
+
+            // Update Order for Page: Alert Detail,  Zone: Main,  Block: IIS Alert Detail
+            Sql(@"UPDATE [Block] SET [Order] = 0 WHERE [Guid] = '3A453580-49BD-4D16-943B-07CF98ACEEFB'");
+
+            // Update Order for Page: Alert Detail,  Zone: Main,  Block: IIS Alert History List
+            Sql(@"UPDATE [Block] SET [Order] = 1 WHERE [Guid] = '28642E24-EE66-4810-82D2-503DA4B5561C'");
+
+
+            // Add Block 
+            //  Block Name: HTML Content
+            //  Page Name: IIS Analytics
+            //  Layout: -
+            //  Site: Rock RMS
+            RockMigrationHelper.AddBlock(true, "FA5D74A9-EC66-45E3-9149-BE75B33C09AD".AsGuid(), null, "C2D29296-6A87-47A9-A753-EE4E9159C4C4".AsGuid(), "19B61D65-37E3-459F-A44F-DEF0089118A3".AsGuid(), "HTML Content", "Sidebar1", @"", @"", 0, "CFBEF7C0-6948-461A-9CEF-E5DE16756EF4");
+
+            // Add/Update HtmlContent for Block: HTML Content
+            RockMigrationHelper.UpdateHtmlContentBlock("CFBEF7C0-6948-461A-9CEF-E5DE16756EF4", $@"<a class=""btn btn-default btn-block mb-4"" href=""/page/{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '1eb38156-8e6e-4d62-b7a0-6a3313b938b1'").ToStringSafe()}""><i class=""fa fa-bell""></i> Alerts</a>", "1CECC2DC-745C-4EC4-97DF-5B196A700F6B");
+
+            // Update Order for Page: IIS Analytics,  Zone: Sidebar1,  Block: HTML Content
+            Sql(@"UPDATE [Block] SET [Order] = 0 WHERE [Guid] = 'CFBEF7C0-6948-461A-9CEF-E5DE16756EF4'");
+
+            // Update Order for Page: IIS Analytics,  Zone: Sidebar1,  Block: Page Menu
+            Sql(@"UPDATE [Block] SET [Order] = 1 WHERE [Guid] = '0A281859-4CFF-4A93-B802-87AA96230AF7'");
+
+
+            // Add Block Attribute Value
+            //   Block: IIS Alert List
+            //   BlockType: IIS Alert List
+            //   Category: net_redeemertech > Security
+            //   Block Location: Page=Alerts, Site=Rock RMS
+            //   Attribute: Detail Page
+            /*   Attribute Value: 524ef496-663f-40f7-b990-f0548d27fbd9 */
+            //   Skip If Already Exists: true
+            RockMigrationHelper.AddBlockAttributeValue(true, "E2FECEFB-EF53-4827-A224-F910A485AF52", "FED8BAEC-1758-4DFA-84F2-C394C8F34616", @"524ef496-663f-40f7-b990-f0548d27fbd9");
+
+            // Add Block Attribute Value
+            //   Block: IIS Alert History List
+            //   BlockType: IIS Alert History List
+            //   Category: net_redeemertech > Security
+            //   Block Location: Page=Alert Detail, Site=Rock RMS
+            //   Attribute: Detail Page
+            /*   Attribute Value: d422afe0-0e4f-4d3b-9c31-b209d11be4f9 */
+            //   Skip If Already Exists: true
+            RockMigrationHelper.AddBlockAttributeValue(true, "28642E24-EE66-4810-82D2-503DA4B5561C", "2AE8485C-0589-4C6B-9BD4-0CB24E613C64", @"d422afe0-0e4f-4d3b-9c31-b209d11be4f9");
         }
 
         public override void Down()

@@ -26,7 +26,7 @@ namespace net.redeemertech.Security
     [IntegerField( "Maximum Parquet Files", "The maximum number of parquet files to include in each alert query.", false, 1000, key: AttributeKey.MaximumParquetFiles, order: 1 )]
     [IntegerField( "Query Timeout Seconds", "The amount of time in seconds to allow each alert query to run before timing out.", false, 10, key: AttributeKey.QueryTimeoutSeconds, order: 2 )]
     [SystemCommunicationField( "Alert Email", "The system communication used to notify recipients when an IIS alert trips.", true, key: AttributeKey.AlertEmail, order: 3, defaultSystemCommunicationGuid: "94fbe63b-5e70-4332-898a-d8031512dc82")]
-    [LinkedPage( "Alert History Detail Page", "The page that displays a single tripped alert history record.", false, key: AttributeKey.AlertHistoryDetailPage, order: 4 )]
+    [LinkedPage( "Alert History Detail Page", "The page that displays a single tripped alert history record.", false, key: AttributeKey.AlertHistoryDetailPage, order: 4, defaultValue: "20FBEDA7-3028-4924-B29A-B445CF6CAEAE")]
     [DisallowConcurrentExecution]
     public class ProcessIISAlerts : RockJob
     {

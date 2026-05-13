@@ -67,6 +67,7 @@
     const isEditable = config.isEditable;
     const isEditMode = ref(isEditable && !alert.value.idKey);
     const isSaving = ref(false);
+    const alertPageParameter = "IISAlertId";
 
     function edit(): void {
         isEditMode.value = true;
@@ -80,6 +81,7 @@
     }
 
     async function save(): Promise<void> {
+        const isNewAlert = !alert.value.idKey;
         isSaving.value = true;
         const result = await invokeBlockAction<IisAlertBag>("SaveAlert", { bag: alert.value });
         isSaving.value = false;
@@ -88,9 +90,40 @@
             alert.value = result.data;
             savedAlert.value = { ...result.data };
             isEditMode.value = false;
+
+            if (isNewAlert && result.data.idKey) {
+                updateUrlForSavedAlert(result.data.idKey);
+            }
         }
         else {
             errorMessage.value = result.errorMessage || "Unable to save alert.";
         }
+    }
+
+    function updateUrlForSavedAlert(idKey: string): void {
+        const url = new URL(window.location.href);
+
+        if (url.searchParams.has(alertPageParameter)) {
+            url.searchParams.set(alertPageParameter, idKey);
+        }
+        else if (!replaceNewAlertPathSegment(url, idKey)) {
+            url.searchParams.set(alertPageParameter, idKey);
+        }
+
+        window.history.replaceState(window.history.state, "", url.toString());
+    }
+
+    function replaceNewAlertPathSegment(url: URL, idKey: string): boolean {
+        const segments = url.pathname.split("/");
+
+        for (let i = segments.length - 1; i >= 0; i--) {
+            if (decodeURIComponent(segments[i]) === "0") {
+                segments[i] = encodeURIComponent(idKey);
+                url.pathname = segments.join("/");
+                return true;
+            }
+        }
+
+        return false;
     }
 </script>

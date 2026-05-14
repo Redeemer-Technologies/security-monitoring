@@ -54,29 +54,29 @@
       <Private>True</Private>
     </Reference>
     <Reference Include="DuckDB.NET.Bindings, Version=1.4.4.0, Culture=neutral, PublicKeyToken=1d0aa5325e915c3b, processorArchitecture=MSIL">
-      <HintPath>..\..\..\RockBase\17_6\packages\DuckDB.NET.Bindings.Full.1.4.4\lib\netstandard2.0\DuckDB.NET.Bindings.dll</HintPath>
+      <HintPath>..\Rock\packages\DuckDB.NET.Bindings.Full.1.4.4\lib\netstandard2.0\DuckDB.NET.Bindings.dll</HintPath>
     </Reference>
     <Reference Include="DuckDB.NET.Data, Version=1.4.4.0, Culture=neutral, PublicKeyToken=1d0aa5325e915c3b, processorArchitecture=MSIL">
-      <HintPath>..\..\..\RockBase\17_6\packages\DuckDB.NET.Data.Full.1.4.4\lib\netstandard2.0\DuckDB.NET.Data.dll</HintPath>
+      <HintPath>..\Rock\packages\DuckDB.NET.Data.Full.1.4.4\lib\netstandard2.0\DuckDB.NET.Data.dll</HintPath>
     </Reference>
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System" />
     <Reference Include="System.Buffers, Version=4.0.4.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>..\..\..\RockBase\17_6\packages\System.Buffers.4.6.0\lib\net462\System.Buffers.dll</HintPath>
+      <HintPath>..\Rock\packages\System.Buffers.4.6.0\lib\net462\System.Buffers.dll</HintPath>
     </Reference>
     <Reference Include="System.Core" />
     <Reference Include="System.Data" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="System.Memory, Version=4.0.2.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>..\..\..\RockBase\17_6\packages\System.Memory.4.6.0\lib\net462\System.Memory.dll</HintPath>
+      <HintPath>..\Rock\packages\System.Memory.4.6.0\lib\net462\System.Memory.dll</HintPath>
     </Reference>
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Numerics" />
     <Reference Include="System.Numerics.Vectors, Version=4.1.5.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>..\..\..\RockBase\17_6\packages\System.Numerics.Vectors.4.6.0\lib\net462\System.Numerics.Vectors.dll</HintPath>
+      <HintPath>..\Rock\packages\System.Numerics.Vectors.4.6.0\lib\net462\System.Numerics.Vectors.dll</HintPath>
     </Reference>
     <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=6.0.1.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
-      <HintPath>..\..\..\RockBase\17_6\packages\System.Runtime.CompilerServices.Unsafe.6.1.0\lib\net462\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <HintPath>..\Rock\packages\System.Runtime.CompilerServices.Unsafe.6.1.0\lib\net462\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
     </Reference>
     <Reference Include="System.Web" />
     <Reference Include="System.Web.Extensions" />
@@ -90,6 +90,7 @@
     <Compile Include="Blocks\IISAlertHistoryList.cs" />
     <Compile Include="Blocks\IISAlertList.cs" />
     <Compile Include="Blocks\LogQuery.cs" />
+    <Compile Include="Blocks\LavaApprovalList.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ViewModels\IISAlertBag.cs" />
     <Compile Include="ViewModels\IISBlockedIpBag.cs" />
@@ -97,6 +98,9 @@
     <Compile Include="ViewModels\IISAlertHistoryBag.cs" />
     <Compile Include="ViewModels\IISAlertHistoryListItemBag.cs" />
     <Compile Include="ViewModels\IISAlertsInitializationBox.cs" />
+    <Compile Include="ViewModels\LavaApprovalBag.cs" />
+    <Compile Include="ViewModels\LavaApprovalContentBag.cs" />
+    <Compile Include="ViewModels\LavaApprovalsInitializationBox.cs" />
     <Compile Include="ViewModels\LogQueryCustomSettingsBag.cs" />
     <Compile Include="ViewModels\LogQueryCustomSettingsOptionsBag.cs" />
     <Compile Include="ViewModels\LogQueryInitializationBox.cs" />

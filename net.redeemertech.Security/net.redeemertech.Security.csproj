@@ -106,12 +106,17 @@
     <Compile Include="Migration\002_Jobs.cs" />
     <Compile Include="Migration\003_IISAlerts.cs" />
     <Compile Include="Migration\004_IISAlertBlocking.cs" />
+    <Compile Include="Migration\005_LavaApprovals.cs" />
     <Compile Include="Model\IISAlert.cs" />
     <Compile Include="Model\IISAlertBlockedIp.cs" />
     <Compile Include="Model\IISAlertBlockedIpService.cs" />
     <Compile Include="Model\IISAlertHistory.cs" />
     <Compile Include="Model\IISAlertHistoryService.cs" />
     <Compile Include="Model\IISAlertService.cs" />
+    <Compile Include="Model\LavaApproval.cs" />
+    <Compile Include="Model\LavaApprovalService.cs" />
+    <Compile Include="Model\LavaApprovalSource.cs" />
+    <Compile Include="Model\LavaApprovalSourceService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

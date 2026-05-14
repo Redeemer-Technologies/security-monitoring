@@ -1,0 +1,163 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <Grid v-else
+              title="Lava Approvals"
+              :data="gridDataSource"
+              keyField="idKey"
+              itemTerm="Lava Source"
+              tooltipField="source"
+              stickyHeader
+              @selectItem="openApproval">
+            <Column name="source"
+                    title="Source"
+                    sortValue="{{ row.source }}"
+                    filterValue="{{ row.source }}"
+                    quickFilterValue="{{ row.source }} {{ row.contentPreview }} {{ row.contentHash }}"
+                    :filter="textValueFilter"
+                    width="25%">
+                <template #format="{ row }">
+                    <strong>{{ row.source }}</strong>
+                    <div class="text-muted">{{ row.matchingSourceCount }} matching source{{ row.matchingSourceCount === 1 ? "" : "s" }}</div>
+                </template>
+            </Column>
+
+            <Column name="contentPreview"
+                    title="Preview"
+                    sortValue="{{ row.contentPreview }}"
+                    filterValue="{{ row.contentPreview }}"
+                    quickFilterValue="{{ row.contentPreview }}"
+                    :filter="textValueFilter"
+                    width="40%">
+                <template #format="{ row }">
+                    <code class="lava-preview">{{ row.contentPreview }}</code>
+                </template>
+            </Column>
+
+            <TextColumn name="detectedDateTime"
+                        title="Detected"
+                        field="detectedDateTime"
+                        :filter="textValueFilter"
+                        visiblePriority="sm"
+                        width="15%" />
+
+            <TextColumn name="contentHash"
+                        title="Content Hash"
+                        field="contentHash"
+                        :filter="textValueFilter"
+                        visiblePriority="xs"
+                        width="15%" />
+
+            <Column v-if="isEditable" name="approve" title="Approve" width="5%">
+                <template #format="{ row }">
+                    <RockButton btnType="primary" @click.stop="openApproval(row.idKey)">Review</RockButton>
+                </template>
+            </Column>
+        </Grid>
+
+        <Modal v-model="isModalOpen" title="Review Lava Approval" :saveText="isEditable ? 'Approve' : ''" @save="approveSelected">
+            <NotificationBox v-if="modalErrorMessage" :alertType="AlertType.Warning">{{ modalErrorMessage }}</NotificationBox>
+
+            <template v-if="selectedSource">
+                <dl>
+                    <dt>Source</dt>
+                    <dd>{{ selectedSource.source }}</dd>
+                    <dt>Content Hash</dt>
+                    <dd><code>{{ selectedContentHash }}</code></dd>
+                    <dt>Matching Sources</dt>
+                    <dd>{{ selectedSource.matchingSourceCount }}</dd>
+                </dl>
+
+                <div class="approval-content">
+                    <pre v-if="selectedContent">{{ selectedContent }}</pre>
+                    <p v-else class="text-muted">Loading content...</p>
+                </div>
+            </template>
+        </Modal>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { computed, ref } from "vue";
+    import Grid, { Column, TextColumn, textValueFilter } from "@Obsidian/Controls/grid";
+    import Modal from "@Obsidian/Controls/modal.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import RockButton from "@Obsidian/Controls/rockButton.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues, useInvokeBlockAction, useReloadBlock } from "@Obsidian/Utility/block";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { LavaApprovalBag } from "./ViewModels/lavaApprovalBag";
+    import { LavaApprovalContentBag } from "./ViewModels/lavaApprovalContentBag";
+    import { LavaApprovalsInitializationBag } from "./ViewModels/lavaApprovalsInitializationBag";
+
+    const config = useConfigurationValues<LavaApprovalsInitializationBag>();
+    const invokeBlockAction = useInvokeBlockAction();
+    const reloadBlock = useReloadBlock();
+    const sources = ref(config.sources ?? []);
+    const errorMessage = ref(config.errorMessage ?? "");
+    const modalErrorMessage = ref("");
+    const selectedContent = ref("");
+    const selectedContentHash = ref("");
+    const selectedSource = ref<LavaApprovalBag | null>(null);
+    const isModalOpen = ref(false);
+    const isEditable = config.isEditable;
+    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: sources.value as Record<string, unknown>[] }));
+
+    async function openApproval(idKey: string | null | undefined): Promise<void> {
+        const source = sources.value.find(s => s.idKey === idKey) ?? null;
+        if (!idKey || !source) {
+            return;
+        }
+
+        selectedSource.value = source;
+        selectedContent.value = "";
+        selectedContentHash.value = source.contentHash ?? "";
+        modalErrorMessage.value = "";
+        isModalOpen.value = true;
+
+        const result = await invokeBlockAction("GetSourceContent", { idKey });
+        if (result.isSuccess && result.data) {
+            const data = result.data as LavaApprovalContentBag;
+            selectedContent.value = data.content ?? "";
+            selectedContentHash.value = data.contentHash ?? selectedContentHash.value;
+        }
+        else {
+            modalErrorMessage.value = result.errorMessage || "Unable to load Lava content.";
+        }
+    }
+
+    async function approveSelected(): Promise<void> {
+        if (!isEditable || !selectedSource.value?.idKey) {
+            return;
+        }
+
+        const result = await invokeBlockAction("Approve", { idKey: selectedSource.value.idKey, note: "" });
+        if (result.isSuccess) {
+            reloadBlock();
+        }
+        else {
+            modalErrorMessage.value = result.errorMessage || "Unable to approve Lava content.";
+        }
+    }
+</script>
+
+<style scoped>
+    .lava-preview {
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .approval-content {
+        max-height: 60vh;
+        overflow: auto;
+    }
+
+    .approval-content pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+</style>

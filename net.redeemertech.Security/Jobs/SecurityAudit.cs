@@ -4,9 +4,14 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Data.SqlClient;
+using System.Data.Entity;
+using System.Security.Cryptography;
 using System.Text;
 using System.Web;
 using System.Web.Script.Serialization;
+
+using net.redeemertech.Security.Model;
 
 using Quartz;
 
@@ -46,6 +51,7 @@ namespace net.redeemertech.Security
         private const string SecurityPluginVersionsUrl = "https://security.redeemertech.com/security-plugin-versions.json";
         private const string SecurityRoleMembershipSnapshotSystemSettingKey = "net.redeemertech.SecurityAudit.SecurityRoleMembershipSnapshot";
         private const string SecurityRoleMembershipSnapshotSystemSettingGuid = "08e7a104-f535-4403-a73e-240cdf8daf49";
+        private const int LavaApprovalScanBatchSize = 5000;
 
         private static string SecurityPluginVersion
         {
@@ -76,6 +82,7 @@ namespace net.redeemertech.Security
                     AuditPasswordRegularExpression(),
                     AuditSecurityRoleMemberships( rockContext ),
                     AuditSqlInjectionContent( rockContext ),
+                    AuditUnapprovedLavaScripts( rockContext ),
                     AuditBinaryFileTypeSecurity( rockContext ),
                     AuditDocumentTypeSecurity( rockContext ),
                     AuditAddPersonToGroupWorkflowSecurity( rockContext )
@@ -387,6 +394,196 @@ namespace net.redeemertech.Security
                 Details = details.ToString(),
                 SqlInjectionContentFindings = findings
             };
+        }
+
+        private AuditCheckResult AuditUnapprovedLavaScripts( RockContext rockContext )
+        {
+            foreach ( var target in GetLavaApprovalScanTargets() )
+            {
+                ScanLavaApprovalTarget( rockContext, target );
+            }
+
+            rockContext.SaveChanges();
+
+            var approvedContentHashes = new LavaApprovalService( rockContext ).Queryable()
+                .Select( a => a.ContentHash )
+                .ToList();
+            var approvedContentHashSet = new HashSet<string>( approvedContentHashes, StringComparer.OrdinalIgnoreCase );
+
+            var unapprovedSources = new LavaApprovalSourceService( rockContext ).Queryable()
+                .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null )
+                .ToList()
+                .Where( s => !approvedContentHashSet.Contains( s.ContentHash ) )
+                .OrderBy( s => s.TableName )
+                .ThenBy( s => s.ColumnName )
+                .ThenBy( s => s.RowId )
+                .Select( s => new LavaApprovalFinding
+                {
+                    TableName = s.TableName,
+                    ColumnName = s.ColumnName,
+                    RowId = s.RowId,
+                    ContentHash = s.ContentHash,
+                    ContentPreview = s.ContentPreview
+                } )
+                .ToList();
+
+            var details = new StringBuilder();
+            foreach ( var source in unapprovedSources )
+            {
+                details.AppendFormat(
+                    "{0}.{1} row {2} contains approval-required Lava. Content hash: {3}.",
+                    source.TableName,
+                    source.ColumnName,
+                    source.RowId,
+                    source.ContentHash );
+                details.AppendLine();
+            }
+
+            return new AuditCheckResult
+            {
+                Name = "Lava Approvals",
+                IsPassing = !unapprovedSources.Any(),
+                Summary = unapprovedSources.Any()
+                    ? string.Format( "Lava Approvals: {0} source row(s) contain unapproved approval-required Lava.", unapprovedSources.Count )
+                    : "Lava Approvals: no unapproved approval-required Lava was found.",
+                Details = details.ToString(),
+                LavaApprovalFindings = unapprovedSources
+            };
+        }
+
+        private void ScanLavaApprovalTarget( RockContext rockContext, LavaApprovalScanTarget target )
+        {
+            RemoveDeletedLavaApprovalSources( rockContext, target );
+
+            var sourceService = new LavaApprovalSourceService( rockContext );
+            var afterRowId = 0;
+
+            while ( true )
+            {
+                var changedRows = rockContext.Database.SqlQuery<LavaApprovalScanRow>(
+                    target.GetChangedRowsSql( LavaApprovalScanBatchSize ),
+                    new SqlParameter( "@AfterRowId", afterRowId ) ).ToList();
+
+                if ( !changedRows.Any() )
+                {
+                    break;
+                }
+
+                afterRowId = changedRows.Max( r => r.RowId );
+                var changedRowIds = changedRows.Select( r => r.RowId ).ToList();
+                var existingSourcesByRowId = sourceService.Queryable()
+                    .Where( s => s.TableName == target.TableName && s.ColumnName == target.ColumnName && changedRowIds.Contains( s.RowId ) )
+                    .ToList()
+                    .ToDictionary( s => s.RowId );
+
+                foreach ( var row in changedRows )
+                {
+                    LavaApprovalSource source;
+                    existingSourcesByRowId.TryGetValue( row.RowId, out source );
+                    UpdateLavaApprovalSource( sourceService, target, row, source );
+                }
+
+                rockContext.SaveChanges();
+                DetachLavaApprovalSources( rockContext );
+            }
+        }
+
+        private void DetachLavaApprovalSources( RockContext rockContext )
+        {
+            foreach ( var entry in rockContext.ChangeTracker.Entries<LavaApprovalSource>().ToList() )
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
+
+        private void UpdateLavaApprovalSource( LavaApprovalSourceService sourceService, LavaApprovalScanTarget target, LavaApprovalScanRow row, LavaApprovalSource source )
+        {
+            if ( source == null )
+            {
+                source = new LavaApprovalSource
+                {
+                    TableName = target.TableName,
+                    ColumnName = target.ColumnName,
+                    RowId = row.RowId
+                };
+                sourceService.Add( source );
+            }
+
+            var now = RockDateTime.Now;
+            source.SourceChecksum = row.SourceChecksum;
+            source.LastScannedDateTime = now;
+            source.LastSeenDateTime = now;
+
+            var hasApprovalRequiredLava = ContainsApprovalRequiredLava( row.Content );
+            var contentHash = hasApprovalRequiredLava ? ComputeContentHash( row.Content ) : null;
+
+            if ( hasApprovalRequiredLava && source.HasApprovalRequiredLava && string.Equals( source.ContentHash, contentHash, StringComparison.OrdinalIgnoreCase ) )
+            {
+                return;
+            }
+
+            source.HasApprovalRequiredLava = hasApprovalRequiredLava;
+            source.ContentHash = contentHash;
+            source.ContentPreview = hasApprovalRequiredLava ? BuildLavaContentPreview( row.Content ) : null;
+
+            if ( hasApprovalRequiredLava && !source.DetectedDateTime.HasValue )
+            {
+                source.DetectedDateTime = now;
+            }
+            else if ( !hasApprovalRequiredLava )
+            {
+                source.DetectedDateTime = null;
+            }
+        }
+
+        private void RemoveDeletedLavaApprovalSources( RockContext rockContext, LavaApprovalScanTarget target )
+        {
+            rockContext.Database.ExecuteSqlCommand( target.GetRemoveDeletedSourcesSql() );
+        }
+
+        private List<LavaApprovalScanTarget> GetLavaApprovalScanTargets()
+        {
+            return new List<LavaApprovalScanTarget>
+            {
+                new LavaApprovalScanTarget(
+                    "AttributeValue",
+                    "Value",
+                    "CONVERT(bigint, t.[ValueChecksum])" ),
+                new LavaApprovalScanTarget(
+                    "HtmlContent",
+                    "Content",
+                    "CONVERT(bigint, SUBSTRING(HASHBYTES('MD5', CONVERT(nvarchar(max), ISNULL(t.[Content], N''))), 1, 8))" )
+            };
+        }
+
+        private bool ContainsApprovalRequiredLava( string content )
+        {
+            if ( content.IsNullOrWhiteSpace() )
+            {
+                return false;
+            }
+
+            return content.IndexOf( "{% sql", StringComparison.OrdinalIgnoreCase ) >= 0;
+        }
+
+        private string ComputeContentHash( string content )
+        {
+            using ( var sha256 = SHA256.Create() )
+            {
+                var hashBytes = sha256.ComputeHash( Encoding.UTF8.GetBytes( content ?? string.Empty ) );
+                return string.Concat( hashBytes.Select( b => b.ToString( "x2" ) ) );
+            }
+        }
+
+        private string BuildLavaContentPreview( string content )
+        {
+            var preview = ( content ?? string.Empty ).Replace( "\r", " " ).Replace( "\n", " " ).Trim();
+            while ( preview.Contains( "  " ) )
+            {
+                preview = preview.Replace( "  ", " " );
+            }
+
+            return preview.Length > 500 ? preview.Substring( 0, 500 ) + "..." : preview;
         }
 
         private AuditCheckResult AuditSecurityPluginVersion()
@@ -878,6 +1075,10 @@ namespace net.redeemertech.Security
                     {
                         html.Append( BuildSqlInjectionContentDetailsHtml( checkResult.SqlInjectionContentFindings ) );
                     }
+                    else if ( checkResult.Name == "Lava Approvals" )
+                    {
+                        html.Append( BuildLavaApprovalDetailsHtml( checkResult.LavaApprovalFindings ) );
+                    }
                     else if ( checkResult.Details.IsNotNullOrWhiteSpace() )
                     {
                         html.AppendFormat( "<p>{0}</p>", HttpUtility.HtmlEncode( checkResult.Details ) );
@@ -1047,6 +1248,32 @@ namespace net.redeemertech.Security
             return html.ToString();
         }
 
+        private string BuildLavaApprovalDetailsHtml( List<LavaApprovalFinding> findings )
+        {
+            if ( findings == null || !findings.Any() )
+            {
+                return "<p>No unapproved approval-required Lava was found.</p>";
+            }
+
+            var html = new StringBuilder();
+            html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;'>" );
+            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Source</th><th align='left' style='border-bottom:1px solid #ddd;'>Content Hash</th><th align='left' style='border-bottom:1px solid #ddd;'>Preview</th></tr></thead><tbody>" );
+
+            foreach ( var finding in findings )
+            {
+                html.AppendFormat(
+                    "<tr><td style='border-bottom:1px solid #eee;'>{0}.{1} #{2}</td><td style='border-bottom:1px solid #eee;'>{3}</td><td style='border-bottom:1px solid #eee;'>{4}</td></tr>",
+                    HttpUtility.HtmlEncode( finding.TableName ),
+                    HttpUtility.HtmlEncode( finding.ColumnName ),
+                    finding.RowId,
+                    HttpUtility.HtmlEncode( finding.ContentHash ),
+                    HttpUtility.HtmlEncode( finding.ContentPreview ) );
+            }
+
+            html.Append( "</tbody></table>" );
+            return html.ToString();
+        }
+
         private class AuditCheckResult
         {
             public string Name { get; set; }
@@ -1066,6 +1293,8 @@ namespace net.redeemertech.Security
             public List<RoleMembershipChange> RoleMembershipChanges { get; set; }
 
             public List<SqlInjectionContentFinding> SqlInjectionContentFindings { get; set; }
+
+            public List<LavaApprovalFinding> LavaApprovalFindings { get; set; }
 
             public List<string> SecurityNotices { get; set; }
         }
@@ -1106,6 +1335,92 @@ namespace net.redeemertech.Security
             public string TableName { get; set; }
 
             public int Id { get; set; }
+        }
+
+        private class LavaApprovalFinding
+        {
+            public string TableName { get; set; }
+
+            public string ColumnName { get; set; }
+
+            public int RowId { get; set; }
+
+            public string ContentHash { get; set; }
+
+            public string ContentPreview { get; set; }
+        }
+
+        private class LavaApprovalScanRow
+        {
+            public int RowId { get; set; }
+
+            public long? SourceChecksum { get; set; }
+
+            public string Content { get; set; }
+        }
+
+        private class LavaApprovalScanTarget
+        {
+            public LavaApprovalScanTarget( string tableName, string columnName, string sourceChecksumSql )
+            {
+                TableName = tableName;
+                ColumnName = columnName;
+                SourceChecksumSql = sourceChecksumSql;
+            }
+
+            public string TableName { get; private set; }
+
+            public string ColumnName { get; private set; }
+
+            public string SourceChecksumSql { get; private set; }
+
+            public string GetChangedRowsSql( int batchSize )
+            {
+                return string.Format( @"
+                    SELECT TOP ({3}) t.[Id] AS [RowId], {2} AS [SourceChecksum], t.[{1}] AS [Content]
+                    FROM [dbo].[{0}] t
+                    LEFT JOIN [dbo].[_net_redeemertech_LavaApprovalSource] s
+                        ON s.[TableName] = N'{0}'
+                        AND s.[ColumnName] = N'{1}'
+                        AND s.[RowId] = t.[Id]
+                    WHERE t.[Id] > @AfterRowId
+                        AND (
+                            (
+                                t.[{1}] IS NOT NULL
+                                AND (
+                                    s.[Id] IS NULL
+                                    OR (s.[SourceChecksum] IS NULL AND {2} IS NOT NULL)
+                                    OR (s.[SourceChecksum] IS NOT NULL AND {2} IS NULL)
+                                    OR s.[SourceChecksum] <> {2}
+                                )
+                            )
+                            OR (
+                                s.[Id] IS NOT NULL
+                                AND t.[{1}] IS NULL
+                            )
+                        )
+                    ORDER BY t.[Id] ASC",
+                    TableName,
+                    ColumnName,
+                    SourceChecksumSql,
+                    batchSize );
+            }
+
+            public string GetRemoveDeletedSourcesSql()
+            {
+                return string.Format( @"
+                    DELETE s
+                    FROM [dbo].[_net_redeemertech_LavaApprovalSource] s
+                    WHERE s.[TableName] = N'{0}'
+                        AND s.[ColumnName] = N'{1}'
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM [dbo].[{0}] t
+                            WHERE t.[Id] = s.[RowId]
+                        )",
+                    TableName,
+                    ColumnName );
+            }
         }
 
         private class FileTypeAuditResult

@@ -127,6 +127,8 @@ namespace net.redeemertech.Security
             var deletedParquetFiles = 0;
             var compactedParquetFiles = 0;
 
+            DuckDbNativeLibrary.EnsureLoaded();
+
             using ( var connection = new DuckDBConnection( "Data Source=:memory:" ) )
             {
                 connection.Open();

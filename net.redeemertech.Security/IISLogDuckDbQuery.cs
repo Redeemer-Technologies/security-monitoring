@@ -40,6 +40,8 @@ namespace net.redeemertech.Security
 
         private DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows, Dictionary<string, object> sqlParameters, string rawLogsSql )
         {
+            DuckDbNativeLibrary.EnsureLoaded();
+
             var sql = loadRows ? preparedQuery : "SELECT * FROM (" + preparedQuery + ") __log_query_schema LIMIT 0";
 
             using ( var connection = new DuckDBConnection( "Data Source=:memory:" ) )

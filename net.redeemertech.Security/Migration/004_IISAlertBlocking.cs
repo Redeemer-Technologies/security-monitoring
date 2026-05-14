@@ -59,6 +59,10 @@ namespace net.redeemertech.Security.Migrations
             RockMigrationHelper.AddPage( true, "8381E992-47CB-472C-823A-51B2FBC87F7F", "22D220B5-0D34-429A-B9E3-59D80AE423E7", "Blocked IPs", "", "4458e0cc-c2a5-40a4-82ad-2ae254e01b6a", "" );
             RockMigrationHelper.AddBlock( true, "4458e0cc-c2a5-40a4-82ad-2ae254e01b6a".AsGuid(), null, "C2D29296-6A87-47A9-A753-EE4E9159C4C4".AsGuid(), "8deec723-675f-4999-9847-67a819bd01ab".AsGuid(), "IIS Blocked IP List", "Main", @"", @"", 0, "c4009176-5728-452c-8253-4797846f600f");
             RockMigrationHelper.AddBlockAttributeValue( true, "c4009176-5728-452c-8253-4797846f600f", "d398ad0c-0e72-41d2-a663-53f79baa2a16", @"d422afe0-0e4f-4d3b-9c31-b209d11be4f9" );
+
+            // Add/Update HtmlContent for Block: HTML Content
+            RockMigrationHelper.UpdateHtmlContentBlock("CFBEF7C0-6948-461A-9CEF-E5DE16756EF4", $@"<a class=""btn btn-default btn-block mb-4"" href=""/page/{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '8381E992-47CB-472C-823A-51B2FBC87F7F'").ToStringSafe()}""><i class=""fa fa-bell""></i> Alerts</a>
+            <a class=""btn btn-default btn-block mb-4"" href=""/page/{SqlScalar("SELECT [Id] FROM [Page] WHERE [Guid] = '4458e0cc-c2a5-40a4-82ad-2ae254e01b6a'").ToStringSafe()}""><i class=""fa fa-ban""></i> Blocked IPs</a>", "1CECC2DC-745C-4EC4-97DF-5B196A700F6B");
         }
 
         public override void Down()

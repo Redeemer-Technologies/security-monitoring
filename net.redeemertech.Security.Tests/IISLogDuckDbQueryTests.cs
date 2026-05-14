@@ -142,6 +142,8 @@ namespace net.redeemertech.Security.Tests
         {
             Directory.CreateDirectory( folder );
             var filePath = Path.Combine( folder, fileName );
+            DuckDbNativeLibrary.EnsureLoaded();
+
             using ( var connection = new DuckDBConnection( "Data Source=:memory:" ) )
             {
                 connection.Open();

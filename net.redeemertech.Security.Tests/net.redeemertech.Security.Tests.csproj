@@ -78,7 +78,7 @@
     <None Include="Fixtures\security-plugin-versions-basic.json" />
     <None Include="Fixtures\security-plugin-versions-notices.json" />
     <None Include="..\Rock\packages\DuckDB.NET.Bindings.Full.1.4.4\runtimes\win-x64\native\duckdb.dll">
-      <Link>duckdb.dll</Link>
+      <Link>DuckDB\duckdb.dll</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="packages.config" />

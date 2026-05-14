@@ -82,6 +82,7 @@ if ([string]::IsNullOrWhiteSpace($version)) {
 $packageName = "net.redeemertech.Security_$version"
 $stagingRoot = Join-Path $RootDir "net.redeemertech.Security.Blocks\obj\Package\$packageName"
 $binStagingDir = Join-Path $stagingRoot "bin"
+$duckDbStagingDir = Join-Path $stagingRoot "DuckDB"
 $pluginStagingDir = Join-Path $stagingRoot "Plugins\net_redeemertech\Security"
 $zipPath = Join-Path $OutputDir "$packageName.zip"
 
@@ -90,6 +91,7 @@ if (Test-Path -LiteralPath $stagingRoot) {
 }
 
 New-Item -ItemType Directory -Path $binStagingDir -Force | Out-Null
+New-Item -ItemType Directory -Path $duckDbStagingDir -Force | Out-Null
 New-Item -ItemType Directory -Path $pluginStagingDir -Force | Out-Null
 
 $dllSourceDirs = @($blocksOutputDir, $securityOutputDir) | Select-Object -Unique
@@ -120,8 +122,15 @@ $duckDbSearchRoots = @(
     (Join-Path $RootDir "..\..\RockBase")
 )
 
-if (-not (Copy-FirstMatch -Roots $duckDbSearchRoots -Filter "duckdb.dll" -Destination $binStagingDir)) {
-    throw "duckdb.dll was not found in the build output or known package locations."
+$duckDbSearchRoots = @(
+    (Join-Path $blocksOutputDir "runtimes\win-x64\native"),
+    (Join-Path $securityOutputDir "runtimes\win-x64\native"),
+    (Join-Path $RootDir "Rock\packages\DuckDB.NET.Bindings.Full.1.4.4\runtimes\win-x64\native"),
+    (Join-Path $RootDir "Rock\packages\DuckDB.NET.Data.Full.1.4.4\runtimes\win-x64\native")
+)
+
+if (-not (Copy-FirstMatch -Roots $duckDbSearchRoots -Filter "duckdb.dll" -Destination $duckDbStagingDir)) {
+    throw "win-x64 duckdb.dll was not found in the build output or known package locations."
 }
 
 Get-ChildItem -LiteralPath $JavascriptDistDir -File -Recurse |

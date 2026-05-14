@@ -26,8 +26,6 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public string LastScannedDateTime { get; set; }
 
-        public string LastSeenDateTime { get; set; }
-
         public int MatchingSourceCount { get; set; }
 
         public bool IsApproved { get; set; }
@@ -45,7 +43,6 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 ContentPreview = source.ContentPreview,
                 DetectedDateTime = FormatDateTime( source.DetectedDateTime ),
                 LastScannedDateTime = FormatDateTime( source.LastScannedDateTime ),
-                LastSeenDateTime = FormatDateTime( source.LastSeenDateTime ),
                 MatchingSourceCount = matchingSourceCount,
                 IsApproved = isApproved
             };

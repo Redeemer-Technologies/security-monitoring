@@ -6,7 +6,7 @@ const { defineConfigs } = require("../Rock/Rock.JavaScript.Obsidian/Build/build-
 const workspacePath = path.resolve(__dirname);
 const srcPath = path.join(workspacePath, "src");
 const outPath = path.join(workspacePath, "dist");
-const blocksPath = path.join(workspacePath, "..", "RockWeb", "Plugins", "net_redeemertech", "Security");
+const blocksPath = path.join(workspacePath, "..", "Rock", "RockWeb", "Plugins", "net_redeemertech", "Security");
 const assetSourcePath = "assets/**/*.js";
 
 const configs = defineConfigs(srcPath, outPath, {

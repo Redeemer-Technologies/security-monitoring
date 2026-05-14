@@ -45,9 +45,6 @@ namespace net.redeemertech.Security.Model
         public DateTime LastScannedDateTime { get; set; }
 
         [DataMember]
-        public DateTime LastSeenDateTime { get; set; }
-
-        [DataMember]
         public DateTime? DetectedDateTime { get; set; }
 
         public override string ToString()

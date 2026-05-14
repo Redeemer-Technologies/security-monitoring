@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -24,6 +25,7 @@ using Rock.Model;
 using Rock.Security;
 using Rock.Utility.Enums;
 using Rock.Web.Cache;
+using Rock.Lava;
 
 namespace net.redeemertech.Security
 {
@@ -51,7 +53,7 @@ namespace net.redeemertech.Security
         private const string SecurityPluginVersionsUrl = "https://security.redeemertech.com/security-plugin-versions.json";
         private const string SecurityRoleMembershipSnapshotSystemSettingKey = "net.redeemertech.SecurityAudit.SecurityRoleMembershipSnapshot";
         private const string SecurityRoleMembershipSnapshotSystemSettingGuid = "08e7a104-f535-4403-a73e-240cdf8daf49";
-        private const int LavaApprovalScanBatchSize = 5000;
+        private const int LavaApprovalScanBatchSize = 10000;
 
         private static string SecurityPluginVersion
         {
@@ -398,19 +400,21 @@ namespace net.redeemertech.Security
 
         private AuditCheckResult AuditUnapprovedLavaScripts( RockContext rockContext )
         {
+            var timingDetails = new List<string>();
+
             foreach ( var target in GetLavaApprovalScanTargets() )
             {
-                ScanLavaApprovalTarget( rockContext, target );
+                ScanLavaApprovalTarget( rockContext, target, timingDetails );
             }
 
-            rockContext.SaveChanges();
-
             var approvedContentHashes = new LavaApprovalService( rockContext ).Queryable()
+                .AsNoTracking()
                 .Select( a => a.ContentHash )
                 .ToList();
             var approvedContentHashSet = new HashSet<string>( approvedContentHashes, StringComparer.OrdinalIgnoreCase );
 
             var unapprovedSources = new LavaApprovalSourceService( rockContext ).Queryable()
+                .AsNoTracking()
                 .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null )
                 .ToList()
                 .Where( s => !approvedContentHashSet.Contains( s.ContentHash ) )
@@ -428,16 +432,23 @@ namespace net.redeemertech.Security
                 .ToList();
 
             var details = new StringBuilder();
-            foreach ( var source in unapprovedSources )
-            {
-                details.AppendFormat(
-                    "{0}.{1} row {2} contains approval-required Lava. Content hash: {3}.",
-                    source.TableName,
-                    source.ColumnName,
-                    source.RowId,
-                    source.ContentHash );
-                details.AppendLine();
-            }
+            //details.AppendLine( "Stopwatch Debugging:" );
+            //foreach ( var timingDetail in timingDetails )
+            //{
+            //    details.AppendLine( timingDetail );
+            //}
+
+            //foreach ( var source in unapprovedSources )
+            //{
+            //    details.AppendLine();
+            //    details.AppendFormat(
+            //        "{0}.{1} row {2} contains approval-required Lava. Content hash: {3}.",
+            //        source.TableName,
+            //        source.ColumnName,
+            //        source.RowId,
+            //        source.ContentHash );
+            //    details.AppendLine();
+            //}
 
             return new AuditCheckResult
             {
@@ -451,94 +462,316 @@ namespace net.redeemertech.Security
             };
         }
 
-        private void ScanLavaApprovalTarget( RockContext rockContext, LavaApprovalScanTarget target )
+        private void ScanLavaApprovalTarget( RockContext rockContext, LavaApprovalScanTarget target, List<string> timingDetails )
         {
-            RemoveDeletedLavaApprovalSources( rockContext, target );
-
-            var sourceService = new LavaApprovalSourceService( rockContext );
+            var targetStopwatch = Stopwatch.StartNew();
             var afterRowId = 0;
+            var batchNumber = 0;
+            var totalChangedRows = 0;
+            var connection = ( SqlConnection ) rockContext.Database.Connection;
+            var shouldCloseConnection = connection.State == System.Data.ConnectionState.Closed;
 
-            while ( true )
+            if ( shouldCloseConnection )
             {
-                var changedRows = rockContext.Database.SqlQuery<LavaApprovalScanRow>(
-                    target.GetChangedRowsSql( LavaApprovalScanBatchSize ),
-                    new SqlParameter( "@AfterRowId", afterRowId ) ).ToList();
+                connection.Open();
+            }
 
-                if ( !changedRows.Any() )
+            try
+            {
+                var removeDeletedStopwatch = Stopwatch.StartNew();
+                RemoveDeletedLavaApprovalSources( connection, target );
+                removeDeletedStopwatch.Stop();
+                timingDetails.Add( string.Format( "{0}.{1} remove deleted sources: {2}.", target.TableName, target.ColumnName, FormatElapsed( removeDeletedStopwatch.Elapsed ) ) );
+
+                while ( true )
                 {
-                    break;
+                    batchNumber++;
+                    var batchTiming = new LavaApprovalScanBatchTiming
+                    {
+                        BatchNumber = batchNumber
+                    };
+
+                    var stageTable = CreateLavaApprovalSourceStageTable();
+                    var changedRowsStopwatch = Stopwatch.StartNew();
+                    var maxRowId = PopulateLavaApprovalSourceStageTable( connection, target, afterRowId, stageTable, batchTiming );
+                    changedRowsStopwatch.Stop();
+                    batchTiming.ChangedRowsElapsed = changedRowsStopwatch.Elapsed;
+
+                    if ( batchTiming.ChangedRowCount == 0 )
+                    {
+                        timingDetails.Add( string.Format( "{0}.{1} batch {2}: changed-row query found no rows after RowId {3} in {4}.", target.TableName, target.ColumnName, batchNumber, afterRowId, FormatElapsed( batchTiming.ChangedRowsElapsed ) ) );
+                        break;
+                    }
+
+                    totalChangedRows += batchTiming.ChangedRowCount;
+                    afterRowId = maxRowId;
+
+                    using ( var transaction = connection.BeginTransaction() )
+                    {
+                        try
+                        {
+                            CreateLavaApprovalSourceStageTable( connection, transaction );
+                            BulkCopyLavaApprovalSourceStageTable( connection, transaction, stageTable, batchTiming );
+                            ApplyLavaApprovalSourceStageTable( connection, transaction, batchTiming );
+                            transaction.Commit();
+                        }
+                        catch
+                        {
+                            transaction.Rollback();
+                            throw;
+                        }
+                    }
+
+                    timingDetails.Add( batchTiming.Format( target ) );
                 }
-
-                afterRowId = changedRows.Max( r => r.RowId );
-                var changedRowIds = changedRows.Select( r => r.RowId ).ToList();
-                var existingSourcesByRowId = sourceService.Queryable()
-                    .Where( s => s.TableName == target.TableName && s.ColumnName == target.ColumnName && changedRowIds.Contains( s.RowId ) )
-                    .ToList()
-                    .ToDictionary( s => s.RowId );
-
-                foreach ( var row in changedRows )
+            }
+            finally
+            {
+                if ( shouldCloseConnection )
                 {
-                    LavaApprovalSource source;
-                    existingSourcesByRowId.TryGetValue( row.RowId, out source );
-                    UpdateLavaApprovalSource( sourceService, target, row, source );
+                    connection.Close();
                 }
-
-                rockContext.SaveChanges();
-                DetachLavaApprovalSources( rockContext );
             }
+
+            targetStopwatch.Stop();
+            timingDetails.Add( string.Format( "{0}.{1} total scan: {2} across {3} changed row(s) in {4} batch attempt(s).", target.TableName, target.ColumnName, FormatElapsed( targetStopwatch.Elapsed ), totalChangedRows, batchNumber ) );
         }
 
-        private void DetachLavaApprovalSources( RockContext rockContext )
+        private string FormatElapsed( TimeSpan elapsed )
         {
-            foreach ( var entry in rockContext.ChangeTracker.Entries<LavaApprovalSource>().ToList() )
-            {
-                entry.State = EntityState.Detached;
-            }
+            return string.Format( "{0:N0} ms", elapsed.TotalMilliseconds );
         }
 
-        private void UpdateLavaApprovalSource( LavaApprovalSourceService sourceService, LavaApprovalScanTarget target, LavaApprovalScanRow row, LavaApprovalSource source )
+        private DataTable CreateLavaApprovalSourceStageTable()
         {
-            if ( source == null )
+            var table = new DataTable();
+            table.Columns.Add( "TableName", typeof( string ) );
+            table.Columns.Add( "ColumnName", typeof( string ) );
+            table.Columns.Add( "RowId", typeof( int ) );
+            table.Columns.Add( "SourceChecksum", typeof( long ) );
+            table.Columns.Add( "ContentHash", typeof( string ) );
+            table.Columns.Add( "HasApprovalRequiredLava", typeof( bool ) );
+            table.Columns.Add( "ContentPreview", typeof( string ) );
+            table.Columns.Add( "ScannedDateTime", typeof( DateTime ) );
+
+            return table;
+        }
+
+        private int PopulateLavaApprovalSourceStageTable( SqlConnection connection, LavaApprovalScanTarget target, int afterRowId, DataTable stageTable, LavaApprovalScanBatchTiming batchTiming )
+        {
+            var maxRowId = afterRowId;
+            var scannedDateTime = RockDateTime.Now;
+
+            using ( var command = connection.CreateCommand() )
             {
-                source = new LavaApprovalSource
+                command.CommandText = target.GetChangedRowsSql( LavaApprovalScanBatchSize );
+                command.Parameters.Add( new SqlParameter( "@AfterRowId", afterRowId ) );
+
+                using ( var reader = command.ExecuteReader( CommandBehavior.SequentialAccess ) )
                 {
-                    TableName = target.TableName,
-                    ColumnName = target.ColumnName,
-                    RowId = row.RowId
-                };
-                sourceService.Add( source );
+                    while ( reader.Read() )
+                    {
+                        var rowId = reader.GetInt32( 0 );
+                        var sourceChecksum = reader.IsDBNull( 1 ) ? ( long? ) null : reader.GetInt64( 1 );
+                        var content = reader.IsDBNull( 2 ) ? null : reader.GetString( 2 );
+
+                        maxRowId = rowId;
+                        batchTiming.ChangedRowCount++;
+
+                        var containsLavaStopwatch = Stopwatch.StartNew();
+                        var hasApprovalRequiredLava = ContainsApprovalRequiredLava( content );
+                        containsLavaStopwatch.Stop();
+                        batchTiming.ContainsLavaElapsed += containsLavaStopwatch.Elapsed;
+
+                        string contentHash = null;
+                        string contentPreview = null;
+
+                        if ( hasApprovalRequiredLava )
+                        {
+                            batchTiming.ApprovalRequiredLavaCount++;
+
+                            var contentHashStopwatch = Stopwatch.StartNew();
+                            contentHash = ComputeContentHash( content );
+                            contentHashStopwatch.Stop();
+                            batchTiming.ComputeHashElapsed += contentHashStopwatch.Elapsed;
+
+                            var previewStopwatch = Stopwatch.StartNew();
+                            contentPreview = BuildLavaContentPreview( content );
+                            previewStopwatch.Stop();
+                            batchTiming.BuildPreviewElapsed += previewStopwatch.Elapsed;
+                        }
+
+                        stageTable.Rows.Add(
+                            target.TableName,
+                            target.ColumnName,
+                            rowId,
+                            sourceChecksum.HasValue ? ( object ) sourceChecksum.Value : DBNull.Value,
+                            contentHash ?? ( object ) DBNull.Value,
+                            hasApprovalRequiredLava,
+                            contentPreview ?? ( object ) DBNull.Value,
+                            scannedDateTime );
+                    }
+                }
             }
 
-            var now = RockDateTime.Now;
-            source.SourceChecksum = row.SourceChecksum;
-            source.LastScannedDateTime = now;
-            source.LastSeenDateTime = now;
+            return maxRowId;
+        }
 
-            var hasApprovalRequiredLava = ContainsApprovalRequiredLava( row.Content );
-            var contentHash = hasApprovalRequiredLava ? ComputeContentHash( row.Content ) : null;
-
-            if ( hasApprovalRequiredLava && source.HasApprovalRequiredLava && string.Equals( source.ContentHash, contentHash, StringComparison.OrdinalIgnoreCase ) )
+        private void CreateLavaApprovalSourceStageTable( SqlConnection connection, SqlTransaction transaction )
+        {
+            using ( var command = connection.CreateCommand() )
             {
-                return;
-            }
-
-            source.HasApprovalRequiredLava = hasApprovalRequiredLava;
-            source.ContentHash = contentHash;
-            source.ContentPreview = hasApprovalRequiredLava ? BuildLavaContentPreview( row.Content ) : null;
-
-            if ( hasApprovalRequiredLava && !source.DetectedDateTime.HasValue )
-            {
-                source.DetectedDateTime = now;
-            }
-            else if ( !hasApprovalRequiredLava )
-            {
-                source.DetectedDateTime = null;
+                command.Transaction = transaction;
+                command.CommandText = @"
+                    CREATE TABLE #LavaApprovalSourceStage (
+                        [TableName] [nvarchar](128) NOT NULL,
+                        [ColumnName] [nvarchar](128) NOT NULL,
+                        [RowId] [int] NOT NULL,
+                        [SourceChecksum] [bigint] NULL,
+                        [ContentHash] [nvarchar](64) NULL,
+                        [HasApprovalRequiredLava] [bit] NOT NULL,
+                        [ContentPreview] [nvarchar](max) NULL,
+                        [ScannedDateTime] [datetime] NOT NULL,
+                        PRIMARY KEY ([TableName], [ColumnName], [RowId])
+                    );";
+                command.ExecuteNonQuery();
             }
         }
 
-        private void RemoveDeletedLavaApprovalSources( RockContext rockContext, LavaApprovalScanTarget target )
+        private void BulkCopyLavaApprovalSourceStageTable( SqlConnection connection, SqlTransaction transaction, DataTable stageTable, LavaApprovalScanBatchTiming batchTiming )
         {
-            rockContext.Database.ExecuteSqlCommand( target.GetRemoveDeletedSourcesSql() );
+            var bulkCopyStopwatch = Stopwatch.StartNew();
+
+            using ( var bulkCopy = new SqlBulkCopy( connection, SqlBulkCopyOptions.CheckConstraints, transaction ) )
+            {
+                bulkCopy.DestinationTableName = "#LavaApprovalSourceStage";
+                bulkCopy.BatchSize = stageTable.Rows.Count;
+                bulkCopy.ColumnMappings.Add( "TableName", "TableName" );
+                bulkCopy.ColumnMappings.Add( "ColumnName", "ColumnName" );
+                bulkCopy.ColumnMappings.Add( "RowId", "RowId" );
+                bulkCopy.ColumnMappings.Add( "SourceChecksum", "SourceChecksum" );
+                bulkCopy.ColumnMappings.Add( "ContentHash", "ContentHash" );
+                bulkCopy.ColumnMappings.Add( "HasApprovalRequiredLava", "HasApprovalRequiredLava" );
+                bulkCopy.ColumnMappings.Add( "ContentPreview", "ContentPreview" );
+                bulkCopy.ColumnMappings.Add( "ScannedDateTime", "ScannedDateTime" );
+                bulkCopy.WriteToServer( stageTable );
+            }
+
+            bulkCopyStopwatch.Stop();
+            batchTiming.BulkCopyElapsed = bulkCopyStopwatch.Elapsed;
+        }
+
+        private void ApplyLavaApprovalSourceStageTable( SqlConnection connection, SqlTransaction transaction, LavaApprovalScanBatchTiming batchTiming )
+        {
+            var applyStopwatch = Stopwatch.StartNew();
+
+            using ( var command = connection.CreateCommand() )
+            {
+                command.Transaction = transaction;
+                command.CommandText = @"
+                    SET NOCOUNT ON;
+
+                    SELECT COUNT(*)
+                    FROM [dbo].[_net_redeemertech_LavaApprovalSource] target
+                    INNER JOIN #LavaApprovalSourceStage stage
+                        ON stage.[TableName] = target.[TableName]
+                        AND stage.[ColumnName] = target.[ColumnName]
+                        AND stage.[RowId] = target.[RowId]
+                    WHERE stage.[HasApprovalRequiredLava] = 1
+                        AND target.[HasApprovalRequiredLava] = 1
+                        AND target.[ContentHash] = stage.[ContentHash];
+
+                    UPDATE target
+                    SET
+                        target.[SourceChecksum] = stage.[SourceChecksum],
+                        target.[ContentHash] = stage.[ContentHash],
+                        target.[HasApprovalRequiredLava] = stage.[HasApprovalRequiredLava],
+                        target.[ContentPreview] = stage.[ContentPreview],
+                        target.[LastScannedDateTime] = stage.[ScannedDateTime],
+                        target.[ModifiedDateTime] = stage.[ScannedDateTime],
+                        target.[DetectedDateTime] = CASE
+                            WHEN stage.[HasApprovalRequiredLava] = 1 AND target.[DetectedDateTime] IS NULL THEN stage.[ScannedDateTime]
+                            WHEN stage.[HasApprovalRequiredLava] = 0 THEN NULL
+                            ELSE target.[DetectedDateTime]
+                        END
+                    FROM [dbo].[_net_redeemertech_LavaApprovalSource] target
+                    INNER JOIN #LavaApprovalSourceStage stage
+                        ON stage.[TableName] = target.[TableName]
+                        AND stage.[ColumnName] = target.[ColumnName]
+                        AND stage.[RowId] = target.[RowId];
+
+                    SELECT @@ROWCOUNT;
+
+                    INSERT INTO [dbo].[_net_redeemertech_LavaApprovalSource] (
+                        [TableName],
+                        [ColumnName],
+                        [RowId],
+                        [SourceChecksum],
+                        [ContentHash],
+                        [HasApprovalRequiredLava],
+                        [ContentPreview],
+                        [LastScannedDateTime],
+                        [DetectedDateTime],
+                        [CreatedDateTime],
+                        [ModifiedDateTime],
+                        [Guid]
+                    )
+                    SELECT
+                        stage.[TableName],
+                        stage.[ColumnName],
+                        stage.[RowId],
+                        stage.[SourceChecksum],
+                        stage.[ContentHash],
+                        stage.[HasApprovalRequiredLava],
+                        stage.[ContentPreview],
+                        stage.[ScannedDateTime],
+                        CASE WHEN stage.[HasApprovalRequiredLava] = 1 THEN stage.[ScannedDateTime] ELSE NULL END,
+                        stage.[ScannedDateTime],
+                        stage.[ScannedDateTime],
+                        NEWID()
+                    FROM #LavaApprovalSourceStage stage
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM [dbo].[_net_redeemertech_LavaApprovalSource] target
+                        WHERE target.[TableName] = stage.[TableName]
+                            AND target.[ColumnName] = stage.[ColumnName]
+                            AND target.[RowId] = stage.[RowId]
+                    );
+
+                    SELECT @@ROWCOUNT;
+
+                    DROP TABLE #LavaApprovalSourceStage;";
+
+                using ( var reader = command.ExecuteReader() )
+                {
+                    if ( reader.Read() )
+                    {
+                        batchTiming.UnchangedApprovalRequiredLavaCount = reader.GetInt32( 0 );
+                    }
+
+                    if ( reader.NextResult() && reader.Read() )
+                    {
+                        batchTiming.ExistingSourceCount = reader.GetInt32( 0 );
+                    }
+
+                    if ( reader.NextResult() && reader.Read() )
+                    {
+                        batchTiming.NewSourceCount = reader.GetInt32( 0 );
+                    }
+                }
+            }
+
+            applyStopwatch.Stop();
+            batchTiming.ApplyStageElapsed = applyStopwatch.Elapsed;
+        }
+
+        private void RemoveDeletedLavaApprovalSources( SqlConnection connection, LavaApprovalScanTarget target )
+        {
+            using ( var command = connection.CreateCommand() )
+            {
+                command.CommandText = target.GetRemoveDeletedSourcesSql();
+                command.ExecuteNonQuery();
+            }
         }
 
         private List<LavaApprovalScanTarget> GetLavaApprovalScanTargets()
@@ -563,7 +796,7 @@ namespace net.redeemertech.Security
                 return false;
             }
 
-            return content.IndexOf( "{% sql", StringComparison.OrdinalIgnoreCase ) >= 0;
+            return LavaHelper.ContainsLavaTags(content);
         }
 
         private string ComputeContentHash( string content )
@@ -1357,6 +1590,58 @@ namespace net.redeemertech.Security
             public long? SourceChecksum { get; set; }
 
             public string Content { get; set; }
+        }
+
+        private class LavaApprovalScanBatchTiming
+        {
+            public int BatchNumber { get; set; }
+
+            public int ChangedRowCount { get; set; }
+
+            public int ExistingSourceCount { get; set; }
+
+            public int NewSourceCount { get; set; }
+
+            public int ApprovalRequiredLavaCount { get; set; }
+
+            public int UnchangedApprovalRequiredLavaCount { get; set; }
+
+            public TimeSpan ChangedRowsElapsed { get; set; }
+
+            public TimeSpan ContainsLavaElapsed { get; set; }
+
+            public TimeSpan ComputeHashElapsed { get; set; }
+
+            public TimeSpan BuildPreviewElapsed { get; set; }
+
+            public TimeSpan BulkCopyElapsed { get; set; }
+
+            public TimeSpan ApplyStageElapsed { get; set; }
+
+            public string Format( LavaApprovalScanTarget target )
+            {
+                return string.Format(
+                    "{0}.{1} batch {2}: rows={3}, existingUpdated={4}, inserted={5}, approvalRequired={6}, unchangedApprovalRequired={7}; read changed rows={8} (contains lava={9}, hash={10}, preview={11}), bulk copy={12}, apply stage={13}.",
+                    target.TableName,
+                    target.ColumnName,
+                    BatchNumber,
+                    ChangedRowCount,
+                    ExistingSourceCount,
+                    NewSourceCount,
+                    ApprovalRequiredLavaCount,
+                    UnchangedApprovalRequiredLavaCount,
+                    FormatElapsed( ChangedRowsElapsed ),
+                    FormatElapsed( ContainsLavaElapsed ),
+                    FormatElapsed( ComputeHashElapsed ),
+                    FormatElapsed( BuildPreviewElapsed ),
+                    FormatElapsed( BulkCopyElapsed ),
+                    FormatElapsed( ApplyStageElapsed ) );
+            }
+
+            private string FormatElapsed( TimeSpan elapsed )
+            {
+                return string.Format( "{0:N0} ms", elapsed.TotalMilliseconds );
+            }
         }
 
         private class LavaApprovalScanTarget

@@ -483,7 +483,10 @@ namespace net.redeemertech.Security
                 removeDeletedStopwatch.Stop();
                 timingDetails.Add( string.Format( "{0}.{1} remove deleted sources: {2}.", target.TableName, target.ColumnName, FormatElapsed( removeDeletedStopwatch.Elapsed ) ) );
 
-                while ( true )
+                var maxTargetRowId = GetMaxLavaApprovalTargetRowId( connection, target );
+                timingDetails.Add( string.Format( "{0}.{1} max target RowId: {2}.", target.TableName, target.ColumnName, maxTargetRowId ) );
+
+                while ( afterRowId < maxTargetRowId )
                 {
                     batchNumber++;
                     var batchTiming = new LavaApprovalScanBatchTiming
@@ -493,18 +496,24 @@ namespace net.redeemertech.Security
 
                     var stageTable = CreateLavaApprovalSourceStageTable();
                     var changedRowsStopwatch = Stopwatch.StartNew();
-                    var maxRowId = PopulateLavaApprovalSourceStageTable( connection, target, afterRowId, stageTable, batchTiming );
+                    var windowMaxRowId = PopulateLavaApprovalSourceStageTable( connection, target, afterRowId, stageTable, batchTiming );
                     changedRowsStopwatch.Stop();
                     batchTiming.ChangedRowsElapsed = changedRowsStopwatch.Elapsed;
 
-                    if ( batchTiming.ChangedRowCount == 0 )
+                    if ( !windowMaxRowId.HasValue )
                     {
-                        timingDetails.Add( string.Format( "{0}.{1} batch {2}: changed-row query found no rows after RowId {3} in {4}.", target.TableName, target.ColumnName, batchNumber, afterRowId, FormatElapsed( batchTiming.ChangedRowsElapsed ) ) );
+                        timingDetails.Add( string.Format( "{0}.{1} batch {2}: source-window query found no rows after RowId {3} in {4}.", target.TableName, target.ColumnName, batchNumber, afterRowId, FormatElapsed( batchTiming.ChangedRowsElapsed ) ) );
                         break;
                     }
 
                     totalChangedRows += batchTiming.ChangedRowCount;
-                    afterRowId = maxRowId;
+                    afterRowId = windowMaxRowId.Value;
+
+                    if ( batchTiming.ChangedRowCount == 0 )
+                    {
+                        timingDetails.Add( batchTiming.Format( target ) );
+                        continue;
+                    }
 
                     using ( var transaction = connection.BeginTransaction() )
                     {
@@ -557,9 +566,19 @@ namespace net.redeemertech.Security
             return table;
         }
 
-        private int PopulateLavaApprovalSourceStageTable( SqlConnection connection, LavaApprovalScanTarget target, int afterRowId, DataTable stageTable, LavaApprovalScanBatchTiming batchTiming )
+        private int GetMaxLavaApprovalTargetRowId( SqlConnection connection, LavaApprovalScanTarget target )
         {
-            var maxRowId = afterRowId;
+            using ( var command = connection.CreateCommand() )
+            {
+                command.CommandText = target.GetMaxRowIdSql();
+                var result = command.ExecuteScalar();
+                return result == DBNull.Value || result == null ? 0 : Convert.ToInt32( result );
+            }
+        }
+
+        private int? PopulateLavaApprovalSourceStageTable( SqlConnection connection, LavaApprovalScanTarget target, int afterRowId, DataTable stageTable, LavaApprovalScanBatchTiming batchTiming )
+        {
+            int? windowMaxRowId = null;
             var scannedDateTime = RockDateTime.Now;
 
             using ( var command = connection.CreateCommand() )
@@ -575,7 +594,6 @@ namespace net.redeemertech.Security
                         var sourceChecksum = reader.IsDBNull( 1 ) ? ( long? ) null : reader.GetInt64( 1 );
                         var content = reader.IsDBNull( 2 ) ? null : reader.GetString( 2 );
 
-                        maxRowId = rowId;
                         batchTiming.ChangedRowCount++;
 
                         var containsLavaStopwatch = Stopwatch.StartNew();
@@ -611,10 +629,16 @@ namespace net.redeemertech.Security
                             contentPreview ?? ( object ) DBNull.Value,
                             scannedDateTime );
                     }
+
+                    if ( reader.NextResult() && reader.Read() && !reader.IsDBNull( 0 ) )
+                    {
+                        windowMaxRowId = reader.GetInt32( 0 );
+                    }
                 }
             }
 
-            return maxRowId;
+            batchTiming.WindowMaxRowId = windowMaxRowId;
+            return windowMaxRowId;
         }
 
         private void CreateLavaApprovalSourceStageTable( SqlConnection connection, SqlTransaction transaction )
@@ -1598,6 +1622,8 @@ namespace net.redeemertech.Security
 
             public int ChangedRowCount { get; set; }
 
+            public int? WindowMaxRowId { get; set; }
+
             public int ExistingSourceCount { get; set; }
 
             public int NewSourceCount { get; set; }
@@ -1621,10 +1647,11 @@ namespace net.redeemertech.Security
             public string Format( LavaApprovalScanTarget target )
             {
                 return string.Format(
-                    "{0}.{1} batch {2}: rows={3}, existingUpdated={4}, inserted={5}, approvalRequired={6}, unchangedApprovalRequired={7}; read changed rows={8} (contains lava={9}, hash={10}, preview={11}), bulk copy={12}, apply stage={13}.",
+                    "{0}.{1} batch {2}: windowMaxRowId={3}, changedRows={4}, existingUpdated={5}, inserted={6}, approvalRequired={7}, unchangedApprovalRequired={8}; read source window={9} (contains lava={10}, hash={11}, preview={12}), bulk copy={13}, apply stage={14}.",
                     target.TableName,
                     target.ColumnName,
                     BatchNumber,
+                    WindowMaxRowId.HasValue ? WindowMaxRowId.Value.ToString() : "none",
                     ChangedRowCount,
                     ExistingSourceCount,
                     NewSourceCount,
@@ -1659,32 +1686,62 @@ namespace net.redeemertech.Security
 
             public string SourceChecksumSql { get; private set; }
 
+            public string GetMaxRowIdSql()
+            {
+                return string.Format( "SELECT ISNULL(MAX([Id]), 0) FROM [dbo].[{0}]", TableName );
+            }
+
             public string GetChangedRowsSql( int batchSize )
             {
                 return string.Format( @"
-                    SELECT TOP ({3}) t.[Id] AS [RowId], {2} AS [SourceChecksum], t.[{1}] AS [Content]
+                    DECLARE @SourceRows TABLE (
+                        [RowId] [int] PRIMARY KEY,
+                        [SourceChecksum] [bigint] NULL,
+                        [Content] [nvarchar](max) NULL
+                    );
+
+                    INSERT INTO @SourceRows
+                    SELECT TOP ({3})
+                        t.[Id],
+                        {2},
+                        t.[{1}]
                     FROM [dbo].[{0}] t
-                    LEFT JOIN [dbo].[_net_redeemertech_LavaApprovalSource] s
-                        ON s.[TableName] = N'{0}'
-                        AND s.[ColumnName] = N'{1}'
-                        AND s.[RowId] = t.[Id]
                     WHERE t.[Id] > @AfterRowId
-                        AND (
-                            (
-                                t.[{1}] IS NOT NULL
+                    ORDER BY t.[Id] ASC;
+
+                    SELECT
+                        t.[RowId],
+                        t.[SourceChecksum],
+                        t.[Content]
+                    FROM @SourceRows t
+                    WHERE (
+                        t.[Content] IS NOT NULL
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM [dbo].[_net_redeemertech_LavaApprovalSource] s
+                            WHERE s.[TableName] = N'{0}'
+                                AND s.[ColumnName] = N'{1}'
+                                AND s.[RowId] = t.[RowId]
                                 AND (
-                                    s.[Id] IS NULL
-                                    OR (s.[SourceChecksum] IS NULL AND {2} IS NOT NULL)
-                                    OR (s.[SourceChecksum] IS NOT NULL AND {2} IS NULL)
-                                    OR s.[SourceChecksum] <> {2}
+                                    s.[SourceChecksum] = t.[SourceChecksum]
+                                    OR (s.[SourceChecksum] IS NULL AND t.[SourceChecksum] IS NULL)
                                 )
-                            )
-                            OR (
-                                s.[Id] IS NOT NULL
-                                AND t.[{1}] IS NULL
-                            )
                         )
-                    ORDER BY t.[Id] ASC",
+                    )
+                    OR (
+                        t.[Content] IS NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM [dbo].[_net_redeemertech_LavaApprovalSource] s
+                            WHERE s.[TableName] = N'{0}'
+                                AND s.[ColumnName] = N'{1}'
+                                AND s.[RowId] = t.[RowId]
+                        )
+                    )
+                    ORDER BY t.[RowId] ASC;
+
+                    SELECT MAX([RowId])
+                    FROM @SourceRows;",
                     TableName,
                     ColumnName,
                     SourceChecksumSql,

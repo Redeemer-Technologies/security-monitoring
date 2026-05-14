@@ -3,6 +3,8 @@ using net.redeemertech.Security.Model;
 using Rock;
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace net.redeemertech.Security.Blocks.ViewModels
 {
@@ -29,6 +31,30 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public int MatchingSourceCount { get; set; }
 
         public bool IsApproved { get; set; }
+
+        public static LavaApprovalBag FromContentHash( string contentHash, List<LavaApprovalSource> sources, bool isApproved )
+        {
+            var firstSource = sources
+                .OrderByDescending( s => s.DetectedDateTime )
+                .ThenBy( s => s.TableName )
+                .ThenBy( s => s.RowId )
+                .First();
+
+            return new LavaApprovalBag
+            {
+                IdKey = contentHash,
+                TableName = firstSource.TableName,
+                ColumnName = firstSource.ColumnName,
+                RowId = firstSource.RowId,
+                Source = contentHash,
+                ContentHash = contentHash,
+                ContentPreview = firstSource.ContentPreview,
+                DetectedDateTime = FormatDateTime( sources.Max( s => s.DetectedDateTime ) ),
+                LastScannedDateTime = FormatDateTime( sources.Max( s => ( DateTime? ) s.LastScannedDateTime ) ),
+                MatchingSourceCount = sources.Count,
+                IsApproved = isApproved
+            };
+        }
 
         public static LavaApprovalBag FromEntity( LavaApprovalSource source, int matchingSourceCount, bool isApproved )
         {

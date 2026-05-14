@@ -432,6 +432,7 @@ namespace net.redeemertech.Security
                 .ToList();
 
             var details = new StringBuilder();
+            
             //details.AppendLine( "Stopwatch Debugging:" );
             //foreach ( var timingDetail in timingDetails )
             //{
@@ -450,12 +451,17 @@ namespace net.redeemertech.Security
             //    details.AppendLine();
             //}
 
+            var unapprovedContentHashCount = unapprovedSources
+                .Select( s => s.ContentHash )
+                .Distinct( StringComparer.OrdinalIgnoreCase )
+                .Count();
+
             return new AuditCheckResult
             {
                 Name = "Lava Approvals",
                 IsPassing = !unapprovedSources.Any(),
                 Summary = unapprovedSources.Any()
-                    ? string.Format( "Lava Approvals: {0} source row(s) contain unapproved approval-required Lava.", unapprovedSources.Count )
+                    ? string.Format( "Lava Approvals: {0} unapproved content hash(es) appear in {1} source row(s).", unapprovedContentHashCount, unapprovedSources.Count )
                     : "Lava Approvals: no unapproved approval-required Lava was found.",
                 Details = details.ToString(),
                 LavaApprovalFindings = unapprovedSources
@@ -585,6 +591,7 @@ namespace net.redeemertech.Security
             {
                 command.CommandText = target.GetChangedRowsSql( LavaApprovalScanBatchSize );
                 command.Parameters.Add( new SqlParameter( "@AfterRowId", afterRowId ) );
+                command.CommandTimeout = 180;
 
                 using ( var reader = command.ExecuteReader( CommandBehavior.SequentialAccess ) )
                 {
@@ -596,10 +603,19 @@ namespace net.redeemertech.Security
 
                         batchTiming.ChangedRowCount++;
 
-                        var containsLavaStopwatch = Stopwatch.StartNew();
-                        var hasApprovalRequiredLava = ContainsApprovalRequiredLava( content );
-                        containsLavaStopwatch.Stop();
-                        batchTiming.ContainsLavaElapsed += containsLavaStopwatch.Elapsed;
+                        var hasApprovalRequiredLava = false;
+
+                        if ( target.ShouldCheckForApprovalRequiredLava )
+                        {
+                            var containsLavaStopwatch = Stopwatch.StartNew();
+                            hasApprovalRequiredLava = ContainsApprovalRequiredLava( content );
+                            containsLavaStopwatch.Stop();
+                            batchTiming.ContainsLavaElapsed += containsLavaStopwatch.Elapsed;
+                        }
+                        else
+                        {
+                            hasApprovalRequiredLava = content != null;
+                        }
 
                         string contentHash = null;
                         string contentPreview = null;
@@ -805,11 +821,55 @@ namespace net.redeemertech.Security
                 new LavaApprovalScanTarget(
                     "AttributeValue",
                     "Value",
-                    "CONVERT(bigint, t.[ValueChecksum])" ),
+                    "CONVERT(bigint, t.[ValueChecksum])",
+                    @"AttributeId IN (SELECT
+	                    [Attribute].[Id]
+                    FROM [Attribute]
+                    INNER JOIN FieldType ON Attribute.FieldTypeId = FieldType.Id
+                    WHERE ([Attribute].[Name] LIKE '%sql%'
+                    OR [Attribute].[Name] LIKE '%Lava%'
+                    OR [Attribute].[Name] LIKE '%Query%'
+                    OR [Attribute].[Guid] = '01C9BA59-D8D4-4137-90A6-B3C06C70BBC3')
+                    -- Things to ignore
+                    AND [Attribute].[Key] NOT IN ('QueryTimeoutSeconds','CommandTimeoutSeconds','SqlCommandTimeout','SaveSQLForDebug')
+                    AND [FieldType].[Name] NOT IN ('Boolean', 'Lava Commands')
+                    AND [Attribute].[Guid] NOT IN (
+	                    '234AD1B4-E4BA-4542-9422-AD3DACAEA890' -- IIS Log Query 'QueryParams'
+	                    ,'B6EBBBE8-2EC7-4C18-BD82-82510445D5C9' -- Obsidian Dynamic Data 'QueryParams'
+	                    ,'0D7A45A6-C885-44CD-9FA9-B8F431D943B5' -- Dynamic Chart 'QueryParams'
+	                    ,'B0EC41B9-37C0-48FD-8E4E-37A8CA305012' -- Dynamic Data 'QueryParams'
+                    ))",
+                    true ),
                 new LavaApprovalScanTarget(
                     "HtmlContent",
                     "Content",
-                    "CONVERT(bigint, SUBSTRING(HASHBYTES('MD5', CONVERT(nvarchar(max), ISNULL(t.[Content], N''))), 1, 8))" )
+                    "CONVERT(bigint, SUBSTRING(HASHBYTES('MD5', CONVERT(nvarchar(max), ISNULL(t.[Content], N''))), 1, 8))",
+                    null,
+                    true ),
+                new LavaApprovalScanTarget(
+                    "Block",
+                    "PreHtml",
+                    "CONVERT(bigint, SUBSTRING(HASHBYTES('MD5', CONVERT(nvarchar(max), ISNULL(t.[PreHtml], N''))), 1, 8))",
+                    null,
+                    true ),
+                 new LavaApprovalScanTarget(
+                    "Block",
+                    "PostHtml",
+                    "CONVERT(bigint, SUBSTRING(HASHBYTES('MD5', CONVERT(nvarchar(max), ISNULL(t.[PostHtml], N''))), 1, 8))",
+                    null,
+                    true ),
+                 new LavaApprovalScanTarget(
+                    "LavaShortcode",
+                    "Markup",
+                    "CONVERT(bigint, SUBSTRING(HASHBYTES('MD5', CONVERT(nvarchar(max), ISNULL(t.[Markup], N''))), 1, 8))",
+                    null,
+                    true ),
+                 new LavaApprovalScanTarget(
+                    "ContentChannelItem",
+                    "Content",
+                    "CONVERT(bigint, SUBSTRING(HASHBYTES('MD5', CONVERT(nvarchar(max), ISNULL(t.[Content], N''))), 1, 8))",
+                    null,
+                    true )
             };
         }
 
@@ -1514,17 +1574,19 @@ namespace net.redeemertech.Security
 
             var html = new StringBuilder();
             html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;'>" );
-            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Source</th><th align='left' style='border-bottom:1px solid #ddd;'>Content Hash</th><th align='left' style='border-bottom:1px solid #ddd;'>Preview</th></tr></thead><tbody>" );
+            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Content Hash</th><th align='right' style='border-bottom:1px solid #ddd;'>Places</th><th align='left' style='border-bottom:1px solid #ddd;'>Preview</th><th align='left' style='border-bottom:1px solid #ddd;'>Locations</th></tr></thead><tbody>" );
 
-            foreach ( var finding in findings )
+            foreach ( var group in findings.GroupBy( f => f.ContentHash, StringComparer.OrdinalIgnoreCase ).OrderBy( g => g.Key ) )
             {
+                var firstFinding = group.First();
+                var locations = string.Join( ", ", group.OrderBy( f => f.TableName ).ThenBy( f => f.ColumnName ).ThenBy( f => f.RowId ).Select( f => string.Format( "{0}.{1} #{2}", f.TableName, f.ColumnName, f.RowId ) ) );
+
                 html.AppendFormat(
-                    "<tr><td style='border-bottom:1px solid #eee;'>{0}.{1} #{2}</td><td style='border-bottom:1px solid #eee;'>{3}</td><td style='border-bottom:1px solid #eee;'>{4}</td></tr>",
-                    HttpUtility.HtmlEncode( finding.TableName ),
-                    HttpUtility.HtmlEncode( finding.ColumnName ),
-                    finding.RowId,
-                    HttpUtility.HtmlEncode( finding.ContentHash ),
-                    HttpUtility.HtmlEncode( finding.ContentPreview ) );
+                    "<tr><td style='border-bottom:1px solid #eee;'>{0}</td><td align='right' style='border-bottom:1px solid #eee;'>{1}</td><td style='border-bottom:1px solid #eee;'>{2}</td><td style='border-bottom:1px solid #eee;'>{3}</td></tr>",
+                    HttpUtility.HtmlEncode( group.Key ),
+                    group.Count(),
+                    HttpUtility.HtmlEncode( firstFinding.ContentPreview ),
+                    HttpUtility.HtmlEncode( locations ) );
             }
 
             html.Append( "</tbody></table>" );
@@ -1673,11 +1735,13 @@ namespace net.redeemertech.Security
 
         private class LavaApprovalScanTarget
         {
-            public LavaApprovalScanTarget( string tableName, string columnName, string sourceChecksumSql )
+            public LavaApprovalScanTarget( string tableName, string columnName, string sourceChecksumSql, string sourceWhereClauseSql = null, bool shouldCheckForApprovalRequiredLava = true )
             {
                 TableName = tableName;
                 ColumnName = columnName;
                 SourceChecksumSql = sourceChecksumSql;
+                SourceWhereClauseSql = sourceWhereClauseSql;
+                ShouldCheckForApprovalRequiredLava = shouldCheckForApprovalRequiredLava;
             }
 
             public string TableName { get; private set; }
@@ -1686,9 +1750,13 @@ namespace net.redeemertech.Security
 
             public string SourceChecksumSql { get; private set; }
 
+            public string SourceWhereClauseSql { get; private set; }
+
+            public bool ShouldCheckForApprovalRequiredLava { get; private set; }
+
             public string GetMaxRowIdSql()
             {
-                return string.Format( "SELECT ISNULL(MAX([Id]), 0) FROM [dbo].[{0}]", TableName );
+                return string.Format( "SELECT ISNULL(MAX(t.[Id]), 0) FROM [dbo].[{0}] t WHERE 1 = 1{1}", TableName, GetSourceWhereConditionSql() );
             }
 
             public string GetChangedRowsSql( int batchSize )
@@ -1707,6 +1775,7 @@ namespace net.redeemertech.Security
                         t.[{1}]
                     FROM [dbo].[{0}] t
                     WHERE t.[Id] > @AfterRowId
+                        {4}
                     ORDER BY t.[Id] ASC;
 
                     SELECT
@@ -1745,7 +1814,8 @@ namespace net.redeemertech.Security
                     TableName,
                     ColumnName,
                     SourceChecksumSql,
-                    batchSize );
+                    batchSize,
+                    GetSourceWhereConditionSql() );
             }
 
             public string GetRemoveDeletedSourcesSql()
@@ -1759,9 +1829,27 @@ namespace net.redeemertech.Security
                             SELECT 1
                             FROM [dbo].[{0}] t
                             WHERE t.[Id] = s.[RowId]
+                                {2}
                         )",
                     TableName,
-                    ColumnName );
+                    ColumnName,
+                    GetSourceWhereConditionSql() );
+            }
+
+            private string GetSourceWhereConditionSql()
+            {
+                if ( SourceWhereClauseSql.IsNullOrWhiteSpace() )
+                {
+                    return string.Empty;
+                }
+
+                var whereClause = SourceWhereClauseSql.Trim();
+                if ( whereClause.StartsWith( "WHERE ", StringComparison.OrdinalIgnoreCase ) )
+                {
+                    whereClause = whereClause.Substring( 6 ).Trim();
+                }
+
+                return string.Format( " AND ({0})", whereClause );
             }
         }
 

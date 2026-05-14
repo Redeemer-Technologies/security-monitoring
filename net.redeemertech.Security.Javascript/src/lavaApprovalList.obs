@@ -3,23 +3,23 @@
         <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
 
         <Grid v-else
-              title="Lava Approvals"
-              :data="gridDataSource"
-              keyField="idKey"
-              itemTerm="Lava Source"
-              tooltipField="source"
-              stickyHeader
-              @selectItem="openApproval">
+               title="Lava Approvals"
+               :data="gridDataSource"
+               keyField="idKey"
+               itemTerm="Content Hash"
+               tooltipField="contentHash"
+               stickyHeader
+               @selectItem="openApproval">
             <Column name="source"
-                    title="Source"
-                    sortValue="{{ row.source }}"
-                    filterValue="{{ row.source }}"
+                    title="Content Hash"
+                    sortValue="{{ row.contentHash }}"
+                    filterValue="{{ row.contentHash }}"
                     quickFilterValue="{{ row.source }} {{ row.contentPreview }} {{ row.contentHash }}"
                     :filter="textValueFilter"
-                    width="25%">
+                    width="35%">
                 <template #format="{ row }">
-                    <strong>{{ row.source }}</strong>
-                    <div class="text-muted">{{ row.matchingSourceCount }} matching source{{ row.matchingSourceCount === 1 ? "" : "s" }}</div>
+                    <code class="hash-preview">{{ row.contentHash }}</code>
+                    <div class="text-muted">Found in {{ row.matchingSourceCount }} place{{ row.matchingSourceCount === 1 ? "" : "s" }}</div>
                 </template>
             </Column>
 
@@ -29,7 +29,7 @@
                     filterValue="{{ row.contentPreview }}"
                     quickFilterValue="{{ row.contentPreview }}"
                     :filter="textValueFilter"
-                    width="40%">
+                    width="45%">
                 <template #format="{ row }">
                     <code class="lava-preview">{{ row.contentPreview }}</code>
                 </template>
@@ -40,13 +40,6 @@
                         field="detectedDateTime"
                         :filter="textValueFilter"
                         visiblePriority="sm"
-                        width="15%" />
-
-            <TextColumn name="contentHash"
-                        title="Content Hash"
-                        field="contentHash"
-                        :filter="textValueFilter"
-                        visiblePriority="xs"
                         width="15%" />
 
             <Column v-if="isEditable" name="approve" title="Approve" width="5%">
@@ -62,12 +55,27 @@
             <template v-if="selectedSource">
                 <dl>
                     <dt>Source</dt>
-                    <dd>{{ selectedSource.source }}</dd>
+                    <dd>{{ selectedSource.matchingSourceCount }} place{{ selectedSource.matchingSourceCount === 1 ? "" : "s" }}</dd>
                     <dt>Content Hash</dt>
                     <dd><code>{{ selectedContentHash }}</code></dd>
-                    <dt>Matching Sources</dt>
-                    <dd>{{ selectedSource.matchingSourceCount }}</dd>
                 </dl>
+
+                <table v-if="selectedSources.length" class="source-table">
+                    <thead>
+                        <tr>
+                            <th>Location</th>
+                            <th>Detected</th>
+                            <th>Preview</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="source in selectedSources" :key="source.idKey ?? source.source ?? source.rowId">
+                            <td>{{ source.source }}</td>
+                            <td>{{ source.detectedDateTime }}</td>
+                            <td><code class="lava-preview">{{ source.contentPreview }}</code></td>
+                        </tr>
+                    </tbody>
+                </table>
 
                 <div class="approval-content">
                     <pre v-if="selectedContent">{{ selectedContent }}</pre>
@@ -99,6 +107,7 @@
     const modalErrorMessage = ref("");
     const selectedContent = ref("");
     const selectedContentHash = ref("");
+    const selectedSources = ref<LavaApprovalBag[]>([]);
     const selectedSource = ref<LavaApprovalBag | null>(null);
     const isModalOpen = ref(false);
     const isEditable = config.isEditable;
@@ -113,14 +122,16 @@
         selectedSource.value = source;
         selectedContent.value = "";
         selectedContentHash.value = source.contentHash ?? "";
+        selectedSources.value = [];
         modalErrorMessage.value = "";
         isModalOpen.value = true;
 
-        const result = await invokeBlockAction("GetSourceContent", { idKey });
+        const result = await invokeBlockAction("GetSourceContent", { contentHash: source.contentHash });
         if (result.isSuccess && result.data) {
             const data = result.data as LavaApprovalContentBag;
             selectedContent.value = data.content ?? "";
             selectedContentHash.value = data.contentHash ?? selectedContentHash.value;
+            selectedSources.value = data.sources ?? [];
         }
         else {
             modalErrorMessage.value = result.errorMessage || "Unable to load Lava content.";
@@ -132,7 +143,7 @@
             return;
         }
 
-        const result = await invokeBlockAction("Approve", { idKey: selectedSource.value.idKey, note: "" });
+        const result = await invokeBlockAction("Approve", { contentHash: selectedContentHash.value, note: "" });
         if (result.isSuccess) {
             reloadBlock();
         }
@@ -149,6 +160,25 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .hash-preview {
+        display: block;
+        overflow-wrap: anywhere;
+    }
+
+    .source-table {
+        border-collapse: collapse;
+        margin-bottom: 16px;
+        width: 100%;
+    }
+
+    .source-table th,
+    .source-table td {
+        border-bottom: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+        vertical-align: top;
     }
 
     .approval-content {

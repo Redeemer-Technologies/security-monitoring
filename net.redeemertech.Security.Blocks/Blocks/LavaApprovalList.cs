@@ -40,83 +40,66 @@ namespace net.redeemertech.Security.Blocks.Blocks
         }
 
         [BlockAction]
-        public BlockActionResult GetSourceContent( string idKey )
+        public BlockActionResult GetSourceContent( string contentHash )
         {
             if ( !CanView() )
             {
                 return ActionForbidden( "Not authorized to view Lava approvals." );
             }
 
-            var source = GetSource( idKey );
-            if ( source == null )
+            if ( contentHash.IsNullOrWhiteSpace() )
             {
-                return ActionNotFound( "Lava approval source was not found." );
+                return ActionBadRequest( "A content hash is required." );
             }
 
-            if ( !source.HasApprovalRequiredLava || source.ContentHash.IsNullOrWhiteSpace() )
+            var currentSources = GetCurrentSourcesByContentHash( contentHash );
+            if ( !currentSources.Any() )
             {
-                return ActionBadRequest( "The selected source does not contain approval-required Lava." );
+                return ActionNotFound( "No current source content was found for this content hash. Run the Security Audit job again before approving it." );
             }
 
-            var content = GetCurrentSourceContent( source );
-            if ( content == null )
-            {
-                return ActionNotFound( "The source content was not found." );
-            }
-
-            var contentHash = ComputeContentHash( content );
-            if ( !string.Equals( contentHash, source.ContentHash, StringComparison.OrdinalIgnoreCase ) )
-            {
-                return ActionBadRequest( "The source content has changed since it was scanned. Run the Security Audit job again before approving it." );
-            }
+            var firstSource = currentSources.First();
+            var content = GetCurrentSourceContent( firstSource );
 
             return ActionOk( new LavaApprovalContentBag
             {
                 Content = content,
-                ContentHash = contentHash
+                ContentHash = firstSource.ContentHash,
+                Sources = currentSources.Select( s => LavaApprovalBag.FromEntity( s, currentSources.Count, false ) ).ToList()
             } );
         }
 
         [BlockAction]
-        public BlockActionResult Approve( string idKey, string note )
+        public BlockActionResult Approve( string contentHash, string note )
         {
             if ( !CanEdit() )
             {
                 return ActionForbidden( "Not authorized to approve Lava scripts." );
             }
 
-            var source = GetSource( idKey );
-            if ( source == null )
+            if ( contentHash.IsNullOrWhiteSpace() )
             {
-                return ActionNotFound( "Lava approval source was not found." );
+                return ActionBadRequest( "A content hash is required." );
             }
 
-            if ( !source.HasApprovalRequiredLava || source.ContentHash.IsNullOrWhiteSpace() )
+            var currentSources = GetCurrentSourcesByContentHash( contentHash );
+            if ( !currentSources.Any() )
             {
-                return ActionBadRequest( "The selected source does not contain approval-required Lava." );
+                return ActionNotFound( "No current source content was found for this content hash. Run the Security Audit job again before approving it." );
             }
 
-            var content = GetCurrentSourceContent( source );
-            if ( content == null )
-            {
-                return ActionNotFound( "The source content was not found." );
-            }
-
-            var contentHash = ComputeContentHash( content );
-            if ( !string.Equals( contentHash, source.ContentHash, StringComparison.OrdinalIgnoreCase ) )
-            {
-                return ActionBadRequest( "The source content has changed since it was scanned. Run the Security Audit job again before approving it." );
-            }
+            var firstSource = currentSources.First();
+            var content = GetCurrentSourceContent( firstSource );
 
             var approvalService = new LavaApprovalService( RockContext );
             var existingApproval = approvalService.Queryable()
-                .FirstOrDefault( a => a.ContentHash == source.ContentHash );
+                .FirstOrDefault( a => a.ContentHash == firstSource.ContentHash );
 
             if ( existingApproval == null )
             {
                 approvalService.Add( new LavaApproval
                 {
-                    ContentHash = source.ContentHash,
+                    ContentHash = firstSource.ContentHash,
                     ApprovedDateTime = RockDateTime.Now,
                     ApprovedByPersonAliasId = RequestContext.CurrentPerson?.PrimaryAliasId,
                     ApprovalNote = note,
@@ -140,27 +123,30 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null )
                 .ToList();
 
-            var sourceCountsByHash = sources
-                .GroupBy( s => s.ContentHash, StringComparer.OrdinalIgnoreCase )
-                .ToDictionary( g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase );
-
             return sources
                 .Where( s => !approvalHashSet.Contains( s.ContentHash ) )
-                .OrderByDescending( s => s.DetectedDateTime )
-                .ThenBy( s => s.TableName )
-                .ThenBy( s => s.RowId )
-                .Select( s => LavaApprovalBag.FromEntity( s, sourceCountsByHash.ContainsKey( s.ContentHash ) ? sourceCountsByHash[s.ContentHash] : 1, false ) )
+                .GroupBy( s => s.ContentHash, StringComparer.OrdinalIgnoreCase )
+                .OrderByDescending( g => g.Max( s => s.DetectedDateTime ) )
+                .ThenBy( g => g.Key )
+                .Select( g => LavaApprovalBag.FromContentHash( g.Key, g.ToList(), false ) )
                 .ToList();
         }
 
-        private LavaApprovalSource GetSource( string idKey )
+        private List<LavaApprovalSource> GetCurrentSourcesByContentHash( string contentHash )
         {
-            if ( idKey.IsNullOrWhiteSpace() )
+            if ( contentHash.IsNullOrWhiteSpace() )
             {
-                return null;
+                return new List<LavaApprovalSource>();
             }
 
-            return new LavaApprovalSourceService( RockContext ).Get( idKey, !PageCache.Layout.Site.DisablePredictableIds );
+            return new LavaApprovalSourceService( RockContext ).Queryable()
+                .Where( s => s.HasApprovalRequiredLava && s.ContentHash == contentHash )
+                .ToList()
+                .Where( s => string.Equals( ComputeContentHash( GetCurrentSourceContent( s ) ), contentHash, StringComparison.OrdinalIgnoreCase ) )
+                .OrderBy( s => s.TableName )
+                .ThenBy( s => s.ColumnName )
+                .ThenBy( s => s.RowId )
+                .ToList();
         }
 
         private string GetCurrentSourceContent( LavaApprovalSource source )
@@ -187,7 +173,11 @@ namespace net.redeemertech.Security.Blocks.Blocks
             return new List<LavaSourceTarget>
             {
                 new LavaSourceTarget( "AttributeValue", "Value" ),
-                new LavaSourceTarget( "HtmlContent", "Content" )
+                new LavaSourceTarget( "HtmlContent", "Content" ),
+                new LavaSourceTarget( "Block", "PreHtml" ),
+                new LavaSourceTarget( "Block", "PostHtml" ),
+                new LavaSourceTarget( "LavaShortcode", "Markup" ),
+                new LavaSourceTarget( "ContentChannelItem", "Content" )
             };
         }
 

@@ -20,10 +20,12 @@ namespace net.redeemertech.Security
     public class LavaApprovalAiEvaluator
     {
         private const string OpenAIChatCompletionsUrl = "https://api.openai.com/v1/chat/completions";
-        private const string DefaultOpenAIModel = "gpt-4o-mini";
+        private const string DefaultOpenAIModel = "gpt-5.4";
+        private const int OpenAIReviewConcurrency = 10;
+        private const int MaxOpenAIReviewContentLength = 500000;
         private static readonly HttpClient HttpClient = new HttpClient();
 
-        public LavaApprovalAiEvaluationSummary EvaluateApprovalRequiredContent( RockContext rockContext, string openAIApiKey, string modelName, IEnumerable<string> contentHashes = null )
+        public LavaApprovalAiEvaluationSummary EvaluateApprovalRequiredContent( RockContext rockContext, string openAIApiKey, string modelName, IEnumerable<string> contentHashes = null, Action<int, int> progressCallback = null )
         {
             if ( openAIApiKey.IsNullOrWhiteSpace() )
             {
@@ -50,8 +52,11 @@ namespace net.redeemertech.Security
 
             var summary = new LavaApprovalAiEvaluationSummary();
 
+            var reviewItems = new List<LavaApprovalAiReviewItem>();
+
             foreach ( var sourceGroup in sources.GroupBy( s => s.ContentHash, StringComparer.OrdinalIgnoreCase ) )
             {
+                var sourceList = sourceGroup.ToList();
                 var firstCurrentSource = sourceGroup
                     .OrderBy( s => s.TableName )
                     .ThenBy( s => s.ColumnName )
@@ -71,36 +76,85 @@ namespace net.redeemertech.Security
                     continue;
                 }
 
-                try
+                if ( content.Length > MaxOpenAIReviewContentLength )
                 {
-                    var result = EvaluateContent( openAIApiKey, modelName, content );
-                    foreach ( var source in sourceGroup )
+                    summary.SkippedCount++;
+                    summary.SkippedContentHashes.Add( sourceGroup.Key );
+                    summary.SkippedMessages.Add( string.Format( "{0}: skipped because content is {1:N0} characters, which exceeds the {2:N0} character AI review limit.", sourceGroup.Key, content.Length, MaxOpenAIReviewContentLength ) );
+                    continue;
+                }
+
+                reviewItems.Add( new LavaApprovalAiReviewItem
+                {
+                    ContentHash = sourceGroup.Key,
+                    Content = content,
+                    Sources = sourceList
+                } );
+            }
+
+            for ( var index = 0; index < reviewItems.Count; index += OpenAIReviewConcurrency )
+            {
+                var batchItems = reviewItems.Skip( index ).Take( OpenAIReviewConcurrency ).ToList();
+                var batchTasks = batchItems
+                    .Select( item => new
                     {
-                        source.AIReviewDateTime = RockDateTime.Now;
-                        source.AIReviewProvider = "OpenAI";
-                        source.AIReviewModel = modelName;
-                        source.AIHasVulnerabilityConcerns = result.HasConcerns;
-                        source.AIRiskAssessment = result.RiskAssessment;
-                        source.AIReviewDetails = result.Details;
-                        source.AIReviewRawResponse = result.RawResponse;
+                        Item = item,
+                        Task = Task.Run( () => EvaluateContent( openAIApiKey, modelName, item.Content ) )
+                    } )
+                    .ToList();
+
+                foreach ( var batchTask in batchTasks )
+                {
+                    try
+                    {
+                        batchTask.Task.Wait();
+                        var result = batchTask.Task.Result;
+
+                        foreach ( var source in batchTask.Item.Sources )
+                        {
+                            source.AIReviewDateTime = RockDateTime.Now;
+                            source.AIReviewProvider = "OpenAI";
+                            source.AIReviewModel = modelName;
+                            source.AIHasVulnerabilityConcerns = result.HasConcerns;
+                            source.AIRiskAssessment = result.RiskAssessment;
+                            source.AIReviewDetails = result.Details;
+                            source.AIReviewRawResponse = result.RawResponse;
+                        }
+
+                        summary.EvaluatedCount++;
+                    }
+                    catch ( Exception ex )
+                    {
+                        summary.FailedCount++;
+                        summary.ErrorMessages.Add( string.Format( "{0}: {1}", batchTask.Item.ContentHash, GetTaskExceptionMessage( ex ) ) );
                     }
 
-                    rockContext.SaveChanges();
-                    summary.EvaluatedCount++;
+                    progressCallback?.Invoke( summary.EvaluatedCount + summary.FailedCount, reviewItems.Count );
                 }
-                catch ( Exception ex )
-                {
-                    summary.FailedCount++;
-                    summary.ErrorMessages.Add( string.Format( "{0}: {1}", sourceGroup.Key, ex.Message ) );
-                }
+
+                rockContext.SaveChanges();
             }
 
             return summary;
         }
 
+        private string GetTaskExceptionMessage( Exception ex )
+        {
+            var aggregateException = ex as AggregateException;
+            if ( aggregateException != null )
+            {
+                return aggregateException.Flatten().InnerExceptions.FirstOrDefault()?.Message ?? aggregateException.Message;
+            }
+
+            return ex.InnerException?.Message ?? ex.Message;
+        }
+
         private LavaApprovalAiEvaluationResult EvaluateContent( string openAIApiKey, string modelName, string content )
         {
-            var serializer = new JavaScriptSerializer();
+            var serializer = new JavaScriptSerializer
+            {
+                MaxJsonLength = 1024 * 1024
+            };
             var payload = new Dictionary<string, object>
             {
                 { "model", modelName },
@@ -204,7 +258,8 @@ Return only a JSON object with these properties:
 Focus on whether this template could allow untrusted input to execute script, inject HTML/JavaScript, or alter SQL/database queries.
 In Rock Lava, {% sql %}{% endsql %} tags allow SQL to run in the template. Liquid/Lava tags or variables that appear inside SQL must be sanitized or parameterized to be safe.
 Tags such as {% person %}, or other tags that start with {% %} and then a Rock entity name, are entity tags and can query the database. Expressions or where clauses on those entity tags generally need an explicit permission check
-to ensure the current user has permissions to access the data that is returned.
+to ensure the current user has permissions to access the data that is returned. The RunLava filter is another security risk to pay attention to, because if the input to RunLava is untrusted, it could allow any Lava to run, including new SQL tags or script tags.
+RunLava runs the lava passed in with the permissions context of the script that runs it.
 Treat direct script output, unsafe HTML rendering, unsanitized request/query/form values, dynamic SQL, and entity queries without permissions checks as concerns.";
         }
 
@@ -324,6 +379,15 @@ Treat direct script output, unsafe HTML rendering, unsanitized request/query/for
             public string RawResponse { get; set; }
         }
 
+        private class LavaApprovalAiReviewItem
+        {
+            public string ContentHash { get; set; }
+
+            public string Content { get; set; }
+
+            public List<LavaApprovalSource> Sources { get; set; }
+        }
+
         private class LavaSourceTarget
         {
             public LavaSourceTarget( string tableName, string columnName )
@@ -349,6 +413,10 @@ Treat direct script output, unsafe HTML rendering, unsanitized request/query/for
         public string ErrorMessage { get; set; }
 
         public List<string> ErrorMessages { get; set; } = new List<string>();
+
+        public List<string> SkippedContentHashes { get; set; } = new List<string>();
+
+        public List<string> SkippedMessages { get; set; } = new List<string>();
 
         public bool HasError
         {

@@ -146,6 +146,8 @@
     import { LavaApprovalContentBag } from "./ViewModels/lavaApprovalContentBag";
     import { LavaApprovalsInitializationBag } from "./ViewModels/lavaApprovalsInitializationBag";
 
+    const aiReviewConcurrency = 10;
+
     const config = useConfigurationValues<LavaApprovalsInitializationBag>();
     const invokeBlockAction = useInvokeBlockAction();
     const reloadBlock = useReloadBlock();
@@ -256,16 +258,38 @@
         aiReviewErrors.value = [];
         aiReviewProgressMessage.value = "Starting AI review...";
 
-        for (const contentHash of contentHashes) {
-            aiReviewCurrentHash.value = contentHash;
-            aiReviewProgressMessage.value = `Reviewing ${aiReviewCompletedCount.value + 1} of ${aiReviewTotalCount.value}...`;
+        let nextIndex = 0;
+        const workerCount = Math.min(aiReviewConcurrency, contentHashes.length);
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (nextIndex < contentHashes.length) {
+                const contentHash = contentHashes[nextIndex++];
+                aiReviewCurrentHash.value = contentHash;
+                aiReviewProgressMessage.value = `Reviewing ${aiReviewCompletedCount.value + 1} of ${aiReviewTotalCount.value}...`;
 
-            const result = await invokeBlockAction("ReviewWithAI", { contentHashes: [contentHash] });
-            if (!result.isSuccess) {
-                aiReviewErrors.value.push(`${contentHash}: ${result.errorMessage || "Unable to review this content."}`);
+                const result = await invokeBlockAction("ReviewWithAI", { contentHashes: [contentHash] });
+                if (!result.isSuccess) {
+                    aiReviewErrors.value.push(`${contentHash}: ${result.errorMessage || "Unable to review this content."}`);
+                }
+                else {
+                    const data = result.data as { skippedMessages?: string[] | null; skippedCount?: number | null } | null;
+                    if ((data?.skippedCount ?? 0) > 0) {
+                        const skippedMessages = data?.skippedMessages?.length
+                            ? data.skippedMessages
+                            : [`${contentHash}: skipped because the content exceeds the AI review size limit.`];
+
+                        aiReviewErrors.value.push(...skippedMessages);
+                    }
+                }
+
+                aiReviewCompletedCount.value++;
             }
+        });
 
-            aiReviewCompletedCount.value++;
+        try {
+            await Promise.all(workers);
+        }
+        catch (error) {
+            aiReviewErrors.value.push(error instanceof Error ? error.message : "An unexpected AI review error occurred.");
         }
 
         aiReviewCurrentHash.value = "";

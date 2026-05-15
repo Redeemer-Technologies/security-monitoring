@@ -107,9 +107,10 @@ namespace net.redeemertech.Security
                 var lavaApprovalOpenAIApiKey = GetAttributeValue( AttributeKey.LavaApprovalOpenAIApiKey );
                 if ( lavaApprovalOpenAIApiKey.IsNotNullOrWhiteSpace() )
                 {
-                    var aiEvaluationResult = EvaluateLavaApprovalsWithAI( rockContext, lavaApprovalOpenAIApiKey, GetAttributeValue( AttributeKey.LavaApprovalOpenAIModel ) );
-                    checkResults.Add( aiEvaluationResult );
+                    EvaluateLavaApprovalsWithAI( rockContext, lavaApprovalOpenAIApiKey, GetAttributeValue( AttributeKey.LavaApprovalOpenAIModel ) );
                 }
+
+                AddHighRiskLavaApprovalSummary( rockContext, checkResults.FirstOrDefault( c => c.Name == "Lava Approvals" ) );
 
                 var passingCheckCount = checkResults.Count( c => c.IsPassing );
                 var jobResult = new StringBuilder();
@@ -146,37 +147,80 @@ namespace net.redeemertech.Security
             }
         }
 
-        private AuditCheckResult EvaluateLavaApprovalsWithAI( RockContext rockContext, string openAIApiKey, string aiModel )
+        private void EvaluateLavaApprovalsWithAI( RockContext rockContext, string openAIApiKey, string aiModel )
         {
-            var summary = new LavaApprovalAiEvaluator().EvaluateApprovalRequiredContent( rockContext, openAIApiKey, aiModel );
-
-            if ( summary.HasError )
+            try
             {
-                return new AuditCheckResult
+                var approvedContentHashes = new LavaApprovalService( rockContext ).Queryable()
+                    .AsNoTracking()
+                    .Select( a => a.ContentHash )
+                    .ToList();
+
+                var approvedContentHashSet = new HashSet<string>( approvedContentHashes, StringComparer.OrdinalIgnoreCase );
+                var reviewedContentHashes = new LavaApprovalSourceService( rockContext ).Queryable()
+                    .AsNoTracking()
+                    .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && s.AIReviewDateTime.HasValue )
+                    .Select( s => s.ContentHash )
+                    .Distinct()
+                    .ToList();
+
+                var reviewedContentHashSet = new HashSet<string>( reviewedContentHashes, StringComparer.OrdinalIgnoreCase );
+                var unreviewedContentHashes = new LavaApprovalSourceService( rockContext ).Queryable()
+                    .AsNoTracking()
+                    .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null )
+                    .Select( s => s.ContentHash )
+                    .ToList()
+                    .Where( h => !approvedContentHashSet.Contains( h ) && !reviewedContentHashSet.Contains( h ) )
+                    .Distinct( StringComparer.OrdinalIgnoreCase )
+                    .ToList();
+
+                if ( unreviewedContentHashes.Any() )
                 {
-                    Name = "Lava Approval AI Review",
-                    IsPassing = false,
-                    Summary = "Lava Approval AI Review: " + summary.ErrorMessage
-                };
+                    UpdateLastStatusMessage( string.Format( "AI Lava Evaluations 0/{0}", unreviewedContentHashes.Count ) );
+                    new LavaApprovalAiEvaluator().EvaluateApprovalRequiredContent(
+                        rockContext,
+                        openAIApiKey,
+                        aiModel,
+                        unreviewedContentHashes,
+                        ( completed, total ) => UpdateLastStatusMessage( string.Format( "AI Lava Evaluations {0}/{1}", completed, total ) ) );
+                }
+            }
+            catch
+            {
+                // AI review failures should not affect the audit email result.
+            }
+        }
+
+        private void AddHighRiskLavaApprovalSummary( RockContext rockContext, AuditCheckResult lavaApprovalResult )
+        {
+            if ( lavaApprovalResult == null || lavaApprovalResult.LavaApprovalFindings == null || !lavaApprovalResult.LavaApprovalFindings.Any() )
+            {
+                return;
             }
 
-            var details = new StringBuilder();
-            foreach ( var errorMessage in summary.ErrorMessages )
+            var outstandingHashSet = new HashSet<string>(
+                lavaApprovalResult.LavaApprovalFindings
+                    .Select( f => f.ContentHash )
+                    .Where( h => h.IsNotNullOrWhiteSpace() ),
+                StringComparer.OrdinalIgnoreCase );
+
+            var highRiskContentHashes = new LavaApprovalSourceService( rockContext ).Queryable()
+                .AsNoTracking()
+                .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && s.AIRiskAssessment == "high" )
+                .Select( s => s.ContentHash )
+                .ToList()
+                .Where( h => outstandingHashSet.Contains( h ) )
+                .Distinct( StringComparer.OrdinalIgnoreCase )
+                .OrderBy( h => h )
+                .ToList();
+
+            if ( !highRiskContentHashes.Any() )
             {
-                details.AppendLine( errorMessage );
+                return;
             }
 
-            return new AuditCheckResult
-            {
-                Name = "Lava Approval AI Review",
-                IsPassing = summary.FailedCount == 0,
-                Summary = string.Format(
-                    "Lava Approval AI Review: evaluated {0} distinct content hash(es), skipped {1}, failed {2}.",
-                    summary.EvaluatedCount,
-                    summary.SkippedCount,
-                    summary.FailedCount ),
-                Details = details.ToString()
-            };
+            lavaApprovalResult.HighRiskLavaApprovalContentHashes = highRiskContentHashes;
+            lavaApprovalResult.Summary += string.Format( " AI flagged {0} outstanding content hash(es) as high risk.", highRiskContentHashes.Count );
         }
 
         private AuditCheckResult AuditBinaryFileTypeSecurity( RockContext rockContext )
@@ -1448,7 +1492,7 @@ namespace net.redeemertech.Security
                     }
                     else if ( checkResult.Name == "Lava Approvals" )
                     {
-                        html.Append( BuildLavaApprovalDetailsHtml( checkResult.LavaApprovalFindings ) );
+                        html.Append( BuildLavaApprovalDetailsHtml( checkResult.LavaApprovalFindings, checkResult.HighRiskLavaApprovalContentHashes ) );
                     }
                     else if ( checkResult.Details.IsNotNullOrWhiteSpace() )
                     {
@@ -1619,7 +1663,7 @@ namespace net.redeemertech.Security
             return html.ToString();
         }
 
-        private string BuildLavaApprovalDetailsHtml( List<LavaApprovalFinding> findings )
+        private string BuildLavaApprovalDetailsHtml( List<LavaApprovalFinding> findings, List<string> highRiskContentHashes )
         {
             if ( findings == null || !findings.Any() )
             {
@@ -1627,6 +1671,15 @@ namespace net.redeemertech.Security
             }
 
             var html = new StringBuilder();
+
+            if ( highRiskContentHashes != null && highRiskContentHashes.Any() )
+            {
+                html.AppendFormat(
+                    "<p style='background-color:#f8d7da;border:1px solid #f5c2c7;color:#842029;padding:12px;'><strong>AI High Risk:</strong> AI flagged {0} outstanding Lava approval content hash(es) as high risk: {1}</p>",
+                    highRiskContentHashes.Count,
+                    HttpUtility.HtmlEncode( string.Join( ", ", highRiskContentHashes ) ) );
+            }
+
             html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;'>" );
             html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Content Hash</th><th align='right' style='border-bottom:1px solid #ddd;'>Places</th><th align='left' style='border-bottom:1px solid #ddd;'>Preview</th><th align='left' style='border-bottom:1px solid #ddd;'>Locations</th></tr></thead><tbody>" );
 
@@ -1668,6 +1721,8 @@ namespace net.redeemertech.Security
             public List<SqlInjectionContentFinding> SqlInjectionContentFindings { get; set; }
 
             public List<LavaApprovalFinding> LavaApprovalFindings { get; set; }
+
+            public List<string> HighRiskLavaApprovalContentHashes { get; set; }
 
             public List<string> SecurityNotices { get; set; }
         }
@@ -1827,7 +1882,7 @@ namespace net.redeemertech.Security
                         t.[Id],
                         {2},
                         t.[{1}]
-                    FROM [dbo].[{0}] t
+                    FROM [dbo].[{0}] t {5}
                     WHERE t.[Id] > @AfterRowId
                         {4}
                     ORDER BY t.[Id] ASC;
@@ -1869,7 +1924,8 @@ namespace net.redeemertech.Security
                     ColumnName,
                     SourceChecksumSql,
                     batchSize,
-                    GetSourceWhereConditionSql() );
+                    GetSourceWhereConditionSql(),
+                    TableName == "AttributeValue" ? "WITH (INDEX(IX_AttributeId))" : string.Empty );
             }
 
             public string GetRemoveDeletedSourcesSql()

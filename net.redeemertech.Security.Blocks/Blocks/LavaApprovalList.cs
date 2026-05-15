@@ -319,21 +319,28 @@ namespace net.redeemertech.Security.Blocks.Blocks
         private List<LavaApprovalEntityDetailBag> GetWorkflowActionTypeAttributeValueEntityDetails( AttributeValueEntityContext context )
         {
             var workflowAction = RockContext.Database.SqlQuery<WorkflowActionTypeAttributeEntityDetail>( @"
-SELECT
-    [wt].[Name] AS [WorkflowTypeName],
-    [wat].[Name] AS [ActivityTypeName],
-    [wa].[Name] AS [ActionTypeName]
-FROM [dbo].[WorkflowActionType] [wa]
-INNER JOIN [dbo].[WorkflowActivityType] [wat] ON [wat].[Id] = [wa].[ActivityTypeId]
-INNER JOIN [dbo].[WorkflowType] [wt] ON [wt].[Id] = [wat].[WorkflowTypeId]
-WHERE [wa].[Id] = @WorkflowActionTypeId",
-                new SqlParameter( "@WorkflowActionTypeId", context.EntityId ?? 0 ) ).FirstOrDefault();
+                SELECT
+                    [wt].[Id] AS [WorkflowTypeId],
+                    [wt].[Name] AS [WorkflowTypeName],
+                    [wat].[Name] AS [ActivityTypeName],
+                    [wa].[Name] AS [ActionTypeName]
+                FROM [dbo].[WorkflowActionType] [wa]
+                INNER JOIN [dbo].[WorkflowActivityType] [wat] ON [wat].[Id] = [wa].[ActivityTypeId]
+                INNER JOIN [dbo].[WorkflowType] [wt] ON [wt].[Id] = [wat].[WorkflowTypeId]
+                WHERE [wa].[Id] = @WorkflowActionTypeId",
+                new SqlParameter( "@WorkflowActionTypeId", context.EntityId ?? 0 ) ).FirstOrDefault();            
 
             var details = new List<LavaApprovalEntityDetailBag>();
             AddDetail( details, "Workflow Type", workflowAction?.WorkflowTypeName );
             AddDetail( details, "Activity Type", workflowAction?.ActivityTypeName );
             AddDetail( details, "Action Type", workflowAction?.ActionTypeName );
             AddDetail( details, "Attribute", context.AttributeName );
+
+            var workflowType = WorkflowTypeCache.Get(workflowAction.WorkflowTypeId);
+            if (workflowType != null)
+            {
+                AddDetail(details, "Workflow Public?", workflowType.IsAuthorized(Authorization.VIEW, null).ToYesNo());
+            }
 
             return details;
         }
@@ -422,6 +429,7 @@ WHERE [wa].[Id] = @WorkflowActionTypeId",
 
         private class WorkflowActionTypeAttributeEntityDetail
         {
+            public int WorkflowTypeId { get; set; }
             public string WorkflowTypeName { get; set; }
 
             public string ActivityTypeName { get; set; }

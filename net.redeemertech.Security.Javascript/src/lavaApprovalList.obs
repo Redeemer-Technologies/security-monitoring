@@ -48,9 +48,10 @@
             <Column name="aiReview"
                     title="AI Review"
                     sortValue="{{ row.aiRiskSortOrder }}"
-                    filterValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDetails }}"
-                    quickFilterValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDetails }}"
-                    :filter="textValueFilter"
+                    filterValue="{{ row.aiRiskAssessment }}"
+                    quickFilterValue="{{ row.aiRiskAssessment }}"
+                    field="aiRiskAssessment"
+                    :filter="pickExistingValueFilter"
                     visiblePriority="sm"
                     width="10%">
                 <template #format="{ row }">
@@ -78,6 +79,11 @@
                     <dt>Content Hash</dt>
                     <dd><code>{{ selectedContentHash }}</code></dd>
                 </dl>
+
+                <NotificationBox v-if="selectedAIRiskAssessment == 'high'" :alertType="AlertType.Danger">
+                    <strong>High Risk:</strong>
+                    This Lava content has been identified as high risk by AI review. Exercise caution when approving or using this content.
+                </NotificationBox>
 
                 <NotificationBox v-if="selectedAIReviewDetails" :alertType="selectedAIHasConcerns ? AlertType.Warning : AlertType.Info">
                     <strong>AI Review:</strong>
@@ -144,7 +150,7 @@
 
 <script setup lang="ts">
     import { computed, ref } from "vue";
-    import Grid, { Column, SelectColumn, TextColumn, textValueFilter, numberValueFilter } from "@Obsidian/Controls/grid";
+    import Grid, { Column, SelectColumn, TextColumn, textValueFilter, numberValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
     import { GridAction, IGridState } from "@Obsidian/Types/Controls/grid";
     import Modal from "@Obsidian/Controls/modal.obs";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";

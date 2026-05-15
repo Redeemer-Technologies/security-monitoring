@@ -107,6 +107,7 @@ namespace net.redeemertech.Security
                 var lavaApprovalOpenAIApiKey = GetAttributeValue( AttributeKey.LavaApprovalOpenAIApiKey );
                 if ( lavaApprovalOpenAIApiKey.IsNotNullOrWhiteSpace() )
                 {
+                    lavaApprovalOpenAIApiKey = Encryption.DecryptString(lavaApprovalOpenAIApiKey);
                     EvaluateLavaApprovalsWithAI( rockContext, lavaApprovalOpenAIApiKey, GetAttributeValue( AttributeKey.LavaApprovalOpenAIModel ) );
                 }
 

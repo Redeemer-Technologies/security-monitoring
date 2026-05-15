@@ -100,6 +100,7 @@
     <Compile Include="ViewModels\IISAlertsInitializationBox.cs" />
     <Compile Include="ViewModels\LavaApprovalBag.cs" />
     <Compile Include="ViewModels\LavaApprovalContentBag.cs" />
+    <Compile Include="ViewModels\LavaApprovalEntityDetailBag.cs" />
     <Compile Include="ViewModels\LavaApprovalsInitializationBox.cs" />
     <Compile Include="ViewModels\LogQueryCustomSettingsBag.cs" />
     <Compile Include="ViewModels\LogQueryCustomSettingsOptionsBag.cs" />

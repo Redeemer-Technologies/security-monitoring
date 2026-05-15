@@ -10,11 +10,20 @@ export type LavaApprovalBag = {
     lastScannedDateTime?: string | null;
     lastSeenDateTime?: string | null;
     matchingSourceCount: number;
+    matchingSourceSortValue?: string | null;
     isApproved: boolean;
     aiReviewDateTime?: string | null;
     aiReviewProvider?: string | null;
     aiReviewModel?: string | null;
     aiHasVulnerabilityConcerns?: boolean | null;
     aiRiskAssessment?: string | null;
+    aiRiskSortOrder: number;
     aiReviewDetails?: string | null;
+    entityDetails?: LavaApprovalEntityDetailBag[] | null;
+};
+
+export type LavaApprovalEntityDetailBag = {
+    label?: string | null;
+    value?: string | null;
+    url?: string | null;
 };

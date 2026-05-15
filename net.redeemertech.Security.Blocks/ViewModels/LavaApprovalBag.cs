@@ -1,7 +1,7 @@
 using net.redeemertech.Security.Model;
 
 using Rock;
-
+using Rock.Web.Cache;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,6 +30,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public int MatchingSourceCount { get; set; }
 
+        public string MatchingSourceSortValue { get; set; }
+
         public bool IsApproved { get; set; }
 
         public string AIReviewDateTime { get; set; }
@@ -42,7 +44,11 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public string AIRiskAssessment { get; set; }
 
+        public int AIRiskSortOrder { get; set; }
+
         public string AIReviewDetails { get; set; }
+
+        public List<LavaApprovalEntityDetailBag> EntityDetails { get; set; }
 
         public static LavaApprovalBag FromContentHash( string contentHash, List<LavaApprovalSource> sources, bool isApproved )
         {
@@ -64,17 +70,19 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 DetectedDateTime = FormatDateTime( sources.Max( s => s.DetectedDateTime ) ),
                 LastScannedDateTime = FormatDateTime( sources.Max( s => ( DateTime? ) s.LastScannedDateTime ) ),
                 MatchingSourceCount = sources.Count,
+                MatchingSourceSortValue = sources.Count.ToString( "D10" ),
                 IsApproved = isApproved,
                 AIReviewDateTime = FormatDateTime( firstSource.AIReviewDateTime ),
                 AIReviewProvider = firstSource.AIReviewProvider,
                 AIReviewModel = firstSource.AIReviewModel,
                 AIHasVulnerabilityConcerns = firstSource.AIHasVulnerabilityConcerns,
                 AIRiskAssessment = firstSource.AIRiskAssessment,
+                AIRiskSortOrder = GetRiskSortOrder( firstSource.AIRiskAssessment ),
                 AIReviewDetails = firstSource.AIReviewDetails
             };
         }
 
-        public static LavaApprovalBag FromEntity( LavaApprovalSource source, int matchingSourceCount, bool isApproved )
+        public static LavaApprovalBag FromEntity( LavaApprovalSource source, int matchingSourceCount, bool isApproved, List<LavaApprovalEntityDetailBag> entityDetails = null )
         {
             return new LavaApprovalBag
             {
@@ -88,14 +96,35 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 DetectedDateTime = FormatDateTime( source.DetectedDateTime ),
                 LastScannedDateTime = FormatDateTime( source.LastScannedDateTime ),
                 MatchingSourceCount = matchingSourceCount,
+                MatchingSourceSortValue = matchingSourceCount.ToString( "D10" ),
                 IsApproved = isApproved,
                 AIReviewDateTime = FormatDateTime( source.AIReviewDateTime ),
                 AIReviewProvider = source.AIReviewProvider,
                 AIReviewModel = source.AIReviewModel,
                 AIHasVulnerabilityConcerns = source.AIHasVulnerabilityConcerns,
                 AIRiskAssessment = source.AIRiskAssessment,
-                AIReviewDetails = source.AIReviewDetails
+                AIRiskSortOrder = GetRiskSortOrder( source.AIRiskAssessment ),
+                AIReviewDetails = source.AIReviewDetails,
+                EntityDetails = entityDetails ?? new List<LavaApprovalEntityDetailBag>()
             };
+        }
+
+        public static int GetRiskSortOrder( string riskAssessment )
+        {
+            switch ( riskAssessment?.Trim().ToLowerInvariant() )
+            {
+                case "high":
+                    return 3;
+
+                case "medium":
+                    return 2;
+
+                case "low":
+                    return 1;
+
+                default:
+                    return 0;
+            }
         }
 
         private static string FormatDateTime( DateTime? dateTime )

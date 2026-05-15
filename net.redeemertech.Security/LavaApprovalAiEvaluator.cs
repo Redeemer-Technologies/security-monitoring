@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
 using net.redeemertech.Security.Model;
+using Rock.Security;
 
 namespace net.redeemertech.Security
 {

@@ -6,6 +6,7 @@ using Rock.Attribute;
 using Rock.Blocks;
 using Rock.Data;
 using Rock.Security;
+using Rock.Web.Cache;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -80,7 +81,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
 
             var firstSource = currentSources.First();
             var content = GetCurrentSourceContent( firstSource );
-
+            
             return ActionOk( new LavaApprovalContentBag
             {
                 Content = content,
@@ -89,7 +90,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 AIRiskAssessment = firstSource.AIRiskAssessment,
                 AIHasVulnerabilityConcerns = firstSource.AIHasVulnerabilityConcerns,
                 AIReviewDateTime = LavaApprovalBag.FromEntity( firstSource, currentSources.Count, false ).AIReviewDateTime,
-                Sources = currentSources.Select( s => LavaApprovalBag.FromEntity( s, currentSources.Count, false ) ).ToList()
+                Sources = currentSources.Select( s => LavaApprovalBag.FromEntity( s, currentSources.Count, false, GetEntityDetails( s ) ) ).ToList()
             } );
         }
 
@@ -184,9 +185,9 @@ namespace net.redeemertech.Security.Blocks.Blocks
             return sources
                 .Where( s => !approvalHashSet.Contains( s.ContentHash ) )
                 .GroupBy( s => s.ContentHash, StringComparer.OrdinalIgnoreCase )
-                .OrderByDescending( g => g.Max( s => s.DetectedDateTime ) )
-                .ThenBy( g => g.Key )
                 .Select( g => LavaApprovalBag.FromContentHash( g.Key, g.ToList(), false ) )
+                .OrderByDescending( b => b.AIRiskSortOrder )
+                .ThenByDescending( g => g.MatchingSourceCount )
                 .ToList();
         }
 
@@ -218,6 +219,138 @@ namespace net.redeemertech.Security.Blocks.Blocks
             return RockContext.Database.SqlQuery<string>(
                 string.Format( "SELECT [{0}] FROM [dbo].[{1}] WHERE [Id] = @RowId", target.ColumnName, target.TableName ),
                 new SqlParameter( "@RowId", source.RowId ) ).FirstOrDefault();
+        }
+
+        private List<LavaApprovalEntityDetailBag> GetEntityDetails( LavaApprovalSource source )
+        {
+            if ( !source.TableName.Equals( "AttributeValue", StringComparison.OrdinalIgnoreCase ) )
+            {
+                return new List<LavaApprovalEntityDetailBag>();
+            }
+
+            return GetAttributeValueEntityDetails( source.RowId );
+        }
+
+        private List<LavaApprovalEntityDetailBag> GetAttributeValueEntityDetails( int attributeValueId )
+        {
+            var context = RockContext.Database.SqlQuery<AttributeValueEntityContext>( @"
+                SELECT
+                    [av].[EntityId],
+                    [a].[Id] AS [AttributeId],
+                    [a].[Name] AS [AttributeName],
+                    [a].[EntityTypeId] AS [AttributeEntityTypeId],
+                    [et].[FriendlyName] AS [EntityName]
+                FROM [dbo].[AttributeValue] [av]
+                INNER JOIN [dbo].[Attribute] [a] ON [a].[Id] = [av].[AttributeId]
+                LEFT OUTER JOIN [dbo].[EntityType] [et] ON [et].[Id] = [a].[EntityTypeId]
+                WHERE [av].[Id] = @AttributeValueId",
+                new SqlParameter( "@AttributeValueId", attributeValueId ) ).FirstOrDefault();
+
+            if ( context == null )
+            {
+                return new List<LavaApprovalEntityDetailBag>();
+            }
+
+            var handlers = GetAttributeEntityDetailHandlers();
+            if ( context.AttributeEntityTypeId.HasValue && handlers.TryGetValue( context.AttributeEntityTypeId.Value, out var handler ) )
+            {
+                return handler( context );
+            }
+
+            return GetDefaultAttributeValueEntityDetails( context );
+        }
+
+        private Dictionary<int, Func<AttributeValueEntityContext, List<LavaApprovalEntityDetailBag>>> GetAttributeEntityDetailHandlers()
+        {
+            var handlers = new Dictionary<int, Func<AttributeValueEntityContext, List<LavaApprovalEntityDetailBag>>>();
+            var blockEntityTypeId = EntityTypeCache.Get( typeof( Rock.Model.Block ) )?.Id;
+            var workflowActionTypeEntityTypeId = EntityTypeCache.Get( typeof( Rock.Model.WorkflowActionType ) )?.Id;
+
+            if ( blockEntityTypeId.HasValue )
+            {
+                handlers[blockEntityTypeId.Value] = GetBlockTypeAttributeValueEntityDetails;
+            }
+
+            if ( workflowActionTypeEntityTypeId.HasValue )
+            {
+                handlers[workflowActionTypeEntityTypeId.Value] = GetWorkflowActionTypeAttributeValueEntityDetails;
+            }
+
+            return handlers;
+        }
+
+        private List<LavaApprovalEntityDetailBag> GetDefaultAttributeValueEntityDetails( AttributeValueEntityContext context )
+        {
+            var details = new List<LavaApprovalEntityDetailBag>();
+
+            AddDetail( details, "Entity", context.EntityName );
+            AddDetail( details, "Attribute", context.AttributeName );
+
+            return details;
+        }
+
+        private List<LavaApprovalEntityDetailBag> GetBlockTypeAttributeValueEntityDetails( AttributeValueEntityContext context )
+        {
+            var details = new List<LavaApprovalEntityDetailBag>();
+            
+
+            var pages = RockContext.Database.SqlQuery<BlockTypePageEntityDetail>( @"
+                SELECT
+                    DISTINCT [p].[Id] AS [PageId],
+                    [p].[InternalName] AS [PageName],
+                    [bt].[Name] [BlockTypeName]
+                FROM [dbo].[Block] [b]
+                INNER JOIN [dbo].[Page] [p] ON [p].[Id] = [b].[PageId]
+                INNER JOIN [dbo].[BlockType] [bt] ON [bt].[Id] = [b].[BlockTypeId]
+                WHERE [b].[Id] = @EntityId
+                ORDER BY [p].[InternalName]",
+                new SqlParameter( "@EntityId", context.EntityId ?? 0 ) ).ToList();
+
+            foreach ( var page in pages )
+            {
+                AddDetail(details, "Page", page.PageName, $"/page/{page.PageId}" );
+                AddDetail(details, "Block Type", page.BlockTypeName);
+                AddDetail(details, "Attribute", context.AttributeName);
+            }
+
+            return details;
+        }
+
+        private List<LavaApprovalEntityDetailBag> GetWorkflowActionTypeAttributeValueEntityDetails( AttributeValueEntityContext context )
+        {
+            var workflowAction = RockContext.Database.SqlQuery<WorkflowActionTypeAttributeEntityDetail>( @"
+SELECT
+    [wt].[Name] AS [WorkflowTypeName],
+    [wat].[Name] AS [ActivityTypeName],
+    [wa].[Name] AS [ActionTypeName]
+FROM [dbo].[WorkflowActionType] [wa]
+INNER JOIN [dbo].[WorkflowActivityType] [wat] ON [wat].[Id] = [wa].[ActivityTypeId]
+INNER JOIN [dbo].[WorkflowType] [wt] ON [wt].[Id] = [wat].[WorkflowTypeId]
+WHERE [wa].[Id] = @WorkflowActionTypeId",
+                new SqlParameter( "@WorkflowActionTypeId", context.EntityId ?? 0 ) ).FirstOrDefault();
+
+            var details = new List<LavaApprovalEntityDetailBag>();
+            AddDetail( details, "Workflow Type", workflowAction?.WorkflowTypeName );
+            AddDetail( details, "Activity Type", workflowAction?.ActivityTypeName );
+            AddDetail( details, "Action Type", workflowAction?.ActionTypeName );
+            AddDetail( details, "Attribute", context.AttributeName );
+
+            return details;
+        }
+
+        private void AddDetail( List<LavaApprovalEntityDetailBag> details, string label, string value, string url = null )
+        {
+            if ( value.IsNullOrWhiteSpace() )
+            {
+                return;
+            }
+
+            details.Add( new LavaApprovalEntityDetailBag
+            {
+                Label = label,
+                Value = value,
+                Url = url
+            } );
         }
 
         private LavaSourceTarget GetAllowedSourceTarget( string tableName, string columnName )
@@ -263,6 +396,37 @@ namespace net.redeemertech.Security.Blocks.Blocks
             public string TableName { get; private set; }
 
             public string ColumnName { get; private set; }
+        }
+
+        private class AttributeValueEntityContext
+        {
+            public int? EntityId { get; set; }
+
+            public int AttributeId { get; set; }
+
+            public string AttributeName { get; set; }
+
+            public int? AttributeEntityTypeId { get; set; }
+
+            public string EntityName { get; set; }
+        }
+
+        private class BlockTypePageEntityDetail
+        {
+            public int PageId { get; set; }
+
+            public string PageName { get; set; }
+
+            public string BlockTypeName { get; set; }
+        }
+
+        private class WorkflowActionTypeAttributeEntityDetail
+        {
+            public string WorkflowTypeName { get; set; }
+
+            public string ActivityTypeName { get; set; }
+
+            public string ActionTypeName { get; set; }
         }
     }
 }

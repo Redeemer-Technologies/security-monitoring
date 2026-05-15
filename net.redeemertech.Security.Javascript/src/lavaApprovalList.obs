@@ -7,23 +7,11 @@
                :data="gridDataSource"
                :customActions="gridActions"
                keyField="idKey"
-               itemTerm="Content Hash"
-               tooltipField="contentHash"
-               stickyHeader>
-            <SelectColumn v-if="isEditable && isAIReviewConfigured" />
-
-            <Column name="source"
-                    title="Content Hash"
-                    sortValue="{{ row.contentHash }}"
-                    filterValue="{{ row.contentHash }}"
-                    quickFilterValue="{{ row.source }} {{ row.contentPreview }} {{ row.contentHash }}"
-                    :filter="textValueFilter"
-                    width="35%">
-                <template #format="{ row }">
-                    <code class="hash-preview">{{ row.contentHash }}</code>
-                    <div class="text-muted">Found in {{ row.matchingSourceCount }} place{{ row.matchingSourceCount === 1 ? "" : "s" }}</div>
-                </template>
-            </Column>
+               itemTerm="Lava Script"
+               tooltipField="contentPreview"
+               stickyHeader
+               @selectItem="openApproval">
+            <SelectColumn v-if="isEditable" />
 
             <Column name="contentPreview"
                     title="Preview"
@@ -37,6 +25,19 @@
                 </template>
             </Column>
 
+            <Column name="matchingSourceCount"
+                    title="Instances"
+                    sortValue="{{ row.matchingSourceSortValue }}"
+                    filterValue="{{ row.matchingSourceCount }}"
+                    quickFilterValue="{{ row.matchingSourceCount }}"
+                    :filter="numberValueFilter"
+                    visiblePriority="sm"
+                    width="10%">
+                <template #format="{ row }">
+                    {{ row.matchingSourceCount }}
+                </template>
+            </Column>
+
             <TextColumn name="detectedDateTime"
                         title="Detected"
                         field="detectedDateTime"
@@ -46,7 +47,7 @@
 
             <Column name="aiReview"
                     title="AI Review"
-                    sortValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDateTime }}"
+                    sortValue="{{ row.aiRiskSortOrder }}"
                     filterValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDetails }}"
                     quickFilterValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDetails }}"
                     :filter="textValueFilter"
@@ -62,7 +63,7 @@
 
             <Column v-if="isEditable" name="approve" title="Approve" width="5%">
                 <template #format="{ row }">
-                    <RockButton btnType="primary" @click.stop="openApproval(row.idKey)">Review</RockButton>
+                    <RockButton btnType="primary" @click.stop="approveRow(row.idKey)">Approve</RockButton>
                 </template>
             </Column>
         </Grid>
@@ -85,19 +86,28 @@
                     <span v-if="selectedAIReviewDateTime">Reviewed {{ selectedAIReviewDateTime }}.</span>
                 </NotificationBox>
 
-                <table v-if="selectedSources.length" class="source-table">
+                <table v-if="selectedSources.length" class="source-table table-striped">
                     <thead>
                         <tr>
                             <th>Location</th>
                             <th>Detected</th>
-                            <th>Preview</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr v-for="source in selectedSources" :key="source.idKey ?? source.source ?? source.rowId">
-                            <td>{{ source.source }}</td>
+                            <td>
+                                <div>{{ source.source }}</div>
+                                <dl v-if="source.entityDetails?.length" class="entity-details">
+                                    <template v-for="detail in source.entityDetails" :key="`${detail.label}:${detail.value}:${detail.url}`">
+                                        <dt>{{ detail.label }}</dt>
+                                        <dd>
+                                            <a v-if="detail.url" :href="detail.url" target="_blank" rel="noopener noreferrer">{{ detail.value }}</a>
+                                            <span v-else>{{ detail.value }}</span>
+                                        </dd>
+                                    </template>
+                                </dl>
+                            </td>
                             <td>{{ source.detectedDateTime }}</td>
-                            <td><code class="lava-preview">{{ source.contentPreview }}</code></td>
                         </tr>
                     </tbody>
                 </table>
@@ -134,7 +144,7 @@
 
 <script setup lang="ts">
     import { computed, ref } from "vue";
-    import Grid, { Column, SelectColumn, TextColumn, textValueFilter } from "@Obsidian/Controls/grid";
+    import Grid, { Column, SelectColumn, TextColumn, textValueFilter, numberValueFilter } from "@Obsidian/Controls/grid";
     import { GridAction, IGridState } from "@Obsidian/Types/Controls/grid";
     import Modal from "@Obsidian/Controls/modal.obs";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
@@ -182,17 +192,30 @@
         return Math.round((aiReviewCompletedCount.value / aiReviewTotalCount.value) * 100);
     });
     const gridActions = computed((): GridAction[] => {
-        if (!isEditable || !isAIReviewConfigured) {
+        if (!isEditable) {
             return [];
         }
 
-        return [{
+        const actions: GridAction[] = [{
+            title: "Approve",
+            tooltip: "Approve selected Lava content",
+            iconCssClass: "ti ti-check",
+            handler: approveSelectedRows
+        }];
+
+        if (!isAIReviewConfigured) {
+            return actions;
+        }
+
+        actions.push({
             title: "AI Review",
             tooltip: "Review selected Lava content with AI",
             iconCssClass: "ti ti-sparkles",
             disabled: isAIReviewInProgress.value,
             handler: reviewSelectedWithAI
-        }];
+        });
+
+        return actions;
     });
 
     async function openApproval(idKey: string | null | undefined): Promise<void> {
@@ -242,8 +265,45 @@
         }
     }
 
+    async function approveRow(idKey: string | null | undefined): Promise<void> {
+        const source = sources.value.find(s => s.idKey === idKey);
+        if (!isEditable || !source?.contentHash) {
+            return;
+        }
+
+        const result = await invokeBlockAction("Approve", { contentHash: source.contentHash, note: "" });
+        if (result.isSuccess) {
+            reloadBlock();
+        }
+        else {
+            errorMessage.value = result.errorMessage || "Unable to approve Lava content.";
+        }
+    }
+
+    async function approveSelectedRows(grid: IGridState): Promise<void> {
+        const contentHashes = grid.selectedKeys.filter((k): k is string => !!k);
+        if (!contentHashes.length) {
+            errorMessage.value = "Select one or more Lava approval rows before approving.";
+            return;
+        }
+
+        if (!confirm(`Approve ${contentHashes.length} Lava approval row${contentHashes.length === 1 ? "" : "s"}?`)) {
+            return;
+        }
+
+        for (const contentHash of contentHashes) {
+            const result = await invokeBlockAction("Approve", { contentHash, note: "" });
+            if (!result.isSuccess) {
+                errorMessage.value = result.errorMessage || "Unable to approve one or more Lava approval rows.";
+                return;
+            }
+        }
+
+        reloadBlock();
+    }
+
     async function reviewSelectedWithAI(grid: IGridState): Promise<void> {
-        const contentHashes = grid.selectedKeys.filter(k => !!k);
+        const contentHashes = grid.selectedKeys.filter((k): k is string => !!k);
         if (!contentHashes.length) {
             errorMessage.value = "Select one or more Lava approval rows before requesting AI review.";
             return;
@@ -316,11 +376,6 @@
         white-space: nowrap;
     }
 
-    .hash-preview {
-        display: block;
-        overflow-wrap: anywhere;
-    }
-
     .source-table {
         border-collapse: collapse;
         margin-bottom: 16px;
@@ -338,6 +393,23 @@
     .approval-content {
         max-height: 60vh;
         overflow: auto;
+    }
+
+    .entity-details {
+        display: grid;
+        gap: 2px 8px;
+        grid-template-columns: max-content 1fr;
+        margin: 6px 0 0;
+    }
+
+    .entity-details dt {
+        color: #666;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .entity-details dd {
+        margin: 0;
     }
 
     .approval-content pre {

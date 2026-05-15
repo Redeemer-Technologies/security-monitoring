@@ -32,6 +32,18 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public bool IsApproved { get; set; }
 
+        public string AIReviewDateTime { get; set; }
+
+        public string AIReviewProvider { get; set; }
+
+        public string AIReviewModel { get; set; }
+
+        public bool? AIHasVulnerabilityConcerns { get; set; }
+
+        public string AIRiskAssessment { get; set; }
+
+        public string AIReviewDetails { get; set; }
+
         public static LavaApprovalBag FromContentHash( string contentHash, List<LavaApprovalSource> sources, bool isApproved )
         {
             var firstSource = sources
@@ -52,7 +64,13 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 DetectedDateTime = FormatDateTime( sources.Max( s => s.DetectedDateTime ) ),
                 LastScannedDateTime = FormatDateTime( sources.Max( s => ( DateTime? ) s.LastScannedDateTime ) ),
                 MatchingSourceCount = sources.Count,
-                IsApproved = isApproved
+                IsApproved = isApproved,
+                AIReviewDateTime = FormatDateTime( firstSource.AIReviewDateTime ),
+                AIReviewProvider = firstSource.AIReviewProvider,
+                AIReviewModel = firstSource.AIReviewModel,
+                AIHasVulnerabilityConcerns = firstSource.AIHasVulnerabilityConcerns,
+                AIRiskAssessment = firstSource.AIRiskAssessment,
+                AIReviewDetails = firstSource.AIReviewDetails
             };
         }
 
@@ -70,7 +88,13 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 DetectedDateTime = FormatDateTime( source.DetectedDateTime ),
                 LastScannedDateTime = FormatDateTime( source.LastScannedDateTime ),
                 MatchingSourceCount = matchingSourceCount,
-                IsApproved = isApproved
+                IsApproved = isApproved,
+                AIReviewDateTime = FormatDateTime( source.AIReviewDateTime ),
+                AIReviewProvider = source.AIReviewProvider,
+                AIReviewModel = source.AIReviewModel,
+                AIHasVulnerabilityConcerns = source.AIHasVulnerabilityConcerns,
+                AIRiskAssessment = source.AIRiskAssessment,
+                AIReviewDetails = source.AIReviewDetails
             };
         }
 

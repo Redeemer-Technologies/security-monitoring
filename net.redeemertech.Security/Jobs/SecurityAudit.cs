@@ -13,7 +13,6 @@ using System.Web;
 using System.Web.Script.Serialization;
 
 using net.redeemertech.Security.Model;
-
 using Quartz;
 
 using Rock;
@@ -47,6 +46,17 @@ namespace net.redeemertech.Security
         false,
         key: AttributeKey.ResultsEmailAddresses,
         order: 2 )]
+    [EncryptedTextField( "Lava Approval OpenAI API Key",
+        "The OpenAI API key to use for evaluating Lava approval content for XSS and SQL injection concerns. Leave blank to skip AI evaluation during this job.",
+        false,
+        key: AttributeKey.LavaApprovalOpenAIApiKey,
+        order: 3,
+        isPassword: true )]
+    [TextField( "Lava Approval OpenAI Model",
+        "The OpenAI model name to use when evaluating Lava approval content. Defaults to gpt-4o-mini if blank.",
+        false,
+        key: AttributeKey.LavaApprovalOpenAIModel,
+        order: 4 )]
     [DisallowConcurrentExecution]
     public class SecurityAudit : RockJob
     {
@@ -70,6 +80,10 @@ namespace net.redeemertech.Security
             public const string DocumentTypesToIgnore = "DocumentTypesToIgnore";
 
             public const string ResultsEmailAddresses = "ResultsEmailAddresses";
+
+            public const string LavaApprovalOpenAIApiKey = "LavaApprovalOpenAIApiKey";
+
+            public const string LavaApprovalOpenAIModel = "LavaApprovalOpenAIModel";
         }
 
         public override void Execute()
@@ -89,6 +103,13 @@ namespace net.redeemertech.Security
                     AuditDocumentTypeSecurity( rockContext ),
                     AuditAddPersonToGroupWorkflowSecurity( rockContext )
                 };
+
+                var lavaApprovalOpenAIApiKey = GetAttributeValue( AttributeKey.LavaApprovalOpenAIApiKey );
+                if ( lavaApprovalOpenAIApiKey.IsNotNullOrWhiteSpace() )
+                {
+                    var aiEvaluationResult = EvaluateLavaApprovalsWithAI( rockContext, lavaApprovalOpenAIApiKey, GetAttributeValue( AttributeKey.LavaApprovalOpenAIModel ) );
+                    checkResults.Add( aiEvaluationResult );
+                }
 
                 var passingCheckCount = checkResults.Count( c => c.IsPassing );
                 var jobResult = new StringBuilder();
@@ -123,6 +144,39 @@ namespace net.redeemertech.Security
                     SendResultsEmail( resultsEmailAddresses, checkResults, passingCheckCount );
                 }
             }
+        }
+
+        private AuditCheckResult EvaluateLavaApprovalsWithAI( RockContext rockContext, string openAIApiKey, string aiModel )
+        {
+            var summary = new LavaApprovalAiEvaluator().EvaluateApprovalRequiredContent( rockContext, openAIApiKey, aiModel );
+
+            if ( summary.HasError )
+            {
+                return new AuditCheckResult
+                {
+                    Name = "Lava Approval AI Review",
+                    IsPassing = false,
+                    Summary = "Lava Approval AI Review: " + summary.ErrorMessage
+                };
+            }
+
+            var details = new StringBuilder();
+            foreach ( var errorMessage in summary.ErrorMessages )
+            {
+                details.AppendLine( errorMessage );
+            }
+
+            return new AuditCheckResult
+            {
+                Name = "Lava Approval AI Review",
+                IsPassing = summary.FailedCount == 0,
+                Summary = string.Format(
+                    "Lava Approval AI Review: evaluated {0} distinct content hash(es), skipped {1}, failed {2}.",
+                    summary.EvaluatedCount,
+                    summary.SkippedCount,
+                    summary.FailedCount ),
+                Details = details.ToString()
+            };
         }
 
         private AuditCheckResult AuditBinaryFileTypeSecurity( RockContext rockContext )

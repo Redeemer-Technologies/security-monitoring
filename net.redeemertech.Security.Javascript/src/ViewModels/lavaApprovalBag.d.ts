@@ -11,4 +11,10 @@ export type LavaApprovalBag = {
     lastSeenDateTime?: string | null;
     matchingSourceCount: number;
     isApproved: boolean;
+    aiReviewDateTime?: string | null;
+    aiReviewProvider?: string | null;
+    aiReviewModel?: string | null;
+    aiHasVulnerabilityConcerns?: boolean | null;
+    aiRiskAssessment?: string | null;
+    aiReviewDetails?: string | null;
 };

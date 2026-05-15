@@ -47,6 +47,30 @@ namespace net.redeemertech.Security.Model
         [DataMember]
         public DateTime? DetectedDateTime { get; set; }
 
+        [DataMember]
+        public DateTime? AIReviewDateTime { get; set; }
+
+        [MaxLength( 50 )]
+        [DataMember]
+        public string AIReviewProvider { get; set; }
+
+        [MaxLength( 100 )]
+        [DataMember]
+        public string AIReviewModel { get; set; }
+
+        [DataMember]
+        public bool? AIHasVulnerabilityConcerns { get; set; }
+
+        [MaxLength( 16 )]
+        [DataMember]
+        public string AIRiskAssessment { get; set; }
+
+        [DataMember]
+        public string AIReviewDetails { get; set; }
+
+        [DataMember]
+        public string AIReviewRawResponse { get; set; }
+
         public override string ToString()
         {
             return string.Format( "{0}.{1}:{2}", TableName, ColumnName, RowId );

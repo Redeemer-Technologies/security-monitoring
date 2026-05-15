@@ -6,6 +6,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
     {
         public bool IsEditable { get; set; }
 
+        public bool IsAIReviewConfigured { get; set; }
+
         public string ErrorMessage { get; set; }
 
         public List<LavaApprovalBag> Sources { get; set; }

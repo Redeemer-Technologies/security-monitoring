@@ -2,9 +2,10 @@ using net.redeemertech.Security.Blocks.ViewModels;
 using net.redeemertech.Security.Model;
 
 using Rock;
+using Rock.Attribute;
 using Rock.Blocks;
 using Rock.Data;
-
+using Rock.Security;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -21,8 +22,26 @@ namespace net.redeemertech.Security.Blocks.Blocks
     [SupportedSiteTypes( Rock.Model.SiteType.Web )]
     [Rock.SystemGuid.EntityTypeGuid( "81c3194f-db46-4a7e-aaff-4dfdcc66d5f4" )]
     [Rock.SystemGuid.BlockTypeGuid( "f15a9d07-140a-4180-bb75-dd640c73db04" )]
+    [EncryptedTextField( "Lava Approval OpenAI API Key",
+        "The OpenAI API key to use when an approver requests AI review from this block.",
+        false,
+        key: AttributeKey.LavaApprovalOpenAIApiKey,
+        order: 0,
+        isPassword: true )]
+    [TextField( "Lava Approval OpenAI Model",
+        "The OpenAI model name to use when evaluating Lava approval content. Defaults to gpt-4o-mini if blank.",
+        false,
+        key: AttributeKey.LavaApprovalOpenAIModel,
+        order: 1 )]
     public class LavaApprovalList : RockBlockType
     {
+        private class AttributeKey
+        {
+            public const string LavaApprovalOpenAIApiKey = "LavaApprovalOpenAIApiKey";
+
+            public const string LavaApprovalOpenAIModel = "LavaApprovalOpenAIModel";
+        }
+
         public override string ObsidianFileUrl => "/Plugins/net_redeemertech/Security/lavaApprovalList.obs";
 
         public override object GetObsidianBlockInitialization()
@@ -35,6 +54,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
             return new LavaApprovalsInitializationBox
             {
                 IsEditable = CanEdit(),
+                IsAIReviewConfigured = GetAttributeValue( AttributeKey.LavaApprovalOpenAIApiKey ).IsNotNullOrWhiteSpace(),
                 Sources = GetLavaApprovalSources()
             };
         }
@@ -65,6 +85,10 @@ namespace net.redeemertech.Security.Blocks.Blocks
             {
                 Content = content,
                 ContentHash = firstSource.ContentHash,
+                AIReviewDetails = firstSource.AIReviewDetails,
+                AIRiskAssessment = firstSource.AIRiskAssessment,
+                AIHasVulnerabilityConcerns = firstSource.AIHasVulnerabilityConcerns,
+                AIReviewDateTime = LavaApprovalBag.FromEntity( firstSource, currentSources.Count, false ).AIReviewDateTime,
                 Sources = currentSources.Select( s => LavaApprovalBag.FromEntity( s, currentSources.Count, false ) ).ToList()
             } );
         }
@@ -109,6 +133,40 @@ namespace net.redeemertech.Security.Blocks.Blocks
             }
 
             return ActionOk();
+        }
+
+        [BlockAction]
+        public BlockActionResult ReviewWithAI( List<string> contentHashes )
+        {
+            if ( !CanEdit() )
+            {
+                return ActionForbidden( "Not authorized to review Lava scripts with AI." );
+            }
+
+            if ( contentHashes == null || !contentHashes.Any( h => h.IsNotNullOrWhiteSpace() ) )
+            {
+                return ActionBadRequest( "At least one content hash is required." );
+            }
+
+            var openAIApiKey = GetAttributeValue( AttributeKey.LavaApprovalOpenAIApiKey );
+            if ( openAIApiKey.IsNullOrWhiteSpace() )
+            {
+                return ActionBadRequest( "An OpenAI API key must be configured on the block before AI review can be used." );
+            }
+            openAIApiKey = Encryption.DecryptString(openAIApiKey);
+
+            var summary = new LavaApprovalAiEvaluator().EvaluateApprovalRequiredContent(
+                RockContext,
+                openAIApiKey,
+                GetAttributeValue( AttributeKey.LavaApprovalOpenAIModel ),
+                contentHashes );
+
+            if ( summary.HasError )
+            {
+                return ActionBadRequest( summary.ErrorMessage );
+            }
+
+            return ActionOk( summary );
         }
 
         private System.Collections.Generic.List<LavaApprovalBag> GetLavaApprovalSources()

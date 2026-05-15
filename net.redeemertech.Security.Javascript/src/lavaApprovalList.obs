@@ -5,11 +5,13 @@
         <Grid v-else
                title="Lava Approvals"
                :data="gridDataSource"
+               :customActions="gridActions"
                keyField="idKey"
                itemTerm="Content Hash"
                tooltipField="contentHash"
-               stickyHeader
-               @selectItem="openApproval">
+               stickyHeader>
+            <SelectColumn v-if="isEditable && isAIReviewConfigured" />
+
             <Column name="source"
                     title="Content Hash"
                     sortValue="{{ row.contentHash }}"
@@ -40,7 +42,23 @@
                         field="detectedDateTime"
                         :filter="textValueFilter"
                         visiblePriority="sm"
-                        width="15%" />
+                        width="10%" />
+
+            <Column name="aiReview"
+                    title="AI Review"
+                    sortValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDateTime }}"
+                    filterValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDetails }}"
+                    quickFilterValue="{{ row.aiRiskAssessment }} {{ row.aiReviewDetails }}"
+                    :filter="textValueFilter"
+                    visiblePriority="sm"
+                    width="10%">
+                <template #format="{ row }">
+                    <span v-if="row.aiReviewDateTime" class="ai-review-status" :class="`risk-${row.aiRiskAssessment ?? 'unknown'}`">
+                        {{ row.aiRiskAssessment || "unknown" }}
+                    </span>
+                    <span v-else class="text-muted">Not reviewed</span>
+                </template>
+            </Column>
 
             <Column v-if="isEditable" name="approve" title="Approve" width="5%">
                 <template #format="{ row }">
@@ -59,6 +77,13 @@
                     <dt>Content Hash</dt>
                     <dd><code>{{ selectedContentHash }}</code></dd>
                 </dl>
+
+                <NotificationBox v-if="selectedAIReviewDetails" :alertType="selectedAIHasConcerns ? AlertType.Warning : AlertType.Info">
+                    <strong>AI Review:</strong>
+                    {{ selectedAIRiskAssessment || "unknown" }} risk.
+                    {{ selectedAIReviewDetails }}
+                    <span v-if="selectedAIReviewDateTime">Reviewed {{ selectedAIReviewDateTime }}.</span>
+                </NotificationBox>
 
                 <table v-if="selectedSources.length" class="source-table">
                     <thead>
@@ -83,12 +108,34 @@
                 </div>
             </template>
         </Modal>
+
+        <Modal v-model="isAIReviewProgressOpen" title="AI Review Progress" saveText="">
+            <NotificationBox v-if="aiReviewProgressError" :alertType="AlertType.Warning">{{ aiReviewProgressError }}</NotificationBox>
+
+            <div class="ai-review-progress">
+                <p>{{ aiReviewProgressMessage }}</p>
+                <div class="progress">
+                    <div class="progress-bar" role="progressbar" :style="{ width: `${aiReviewProgressPercent}%` }">
+                        {{ aiReviewCompletedCount }} / {{ aiReviewTotalCount }}
+                    </div>
+                </div>
+
+                <p v-if="aiReviewCurrentHash" class="text-muted">
+                    Reviewing <code>{{ aiReviewCurrentHash }}</code>
+                </p>
+
+                <ul v-if="aiReviewErrors.length" class="ai-review-errors">
+                    <li v-for="error in aiReviewErrors" :key="error">{{ error }}</li>
+                </ul>
+            </div>
+        </Modal>
     </div>
 </template>
 
 <script setup lang="ts">
     import { computed, ref } from "vue";
-    import Grid, { Column, TextColumn, textValueFilter } from "@Obsidian/Controls/grid";
+    import Grid, { Column, SelectColumn, TextColumn, textValueFilter } from "@Obsidian/Controls/grid";
+    import { GridAction, IGridState } from "@Obsidian/Types/Controls/grid";
     import Modal from "@Obsidian/Controls/modal.obs";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
     import RockButton from "@Obsidian/Controls/rockButton.obs";
@@ -109,9 +156,42 @@
     const selectedContentHash = ref("");
     const selectedSources = ref<LavaApprovalBag[]>([]);
     const selectedSource = ref<LavaApprovalBag | null>(null);
+    const selectedAIReviewDetails = ref("");
+    const selectedAIRiskAssessment = ref("");
+    const selectedAIHasConcerns = ref(false);
+    const selectedAIReviewDateTime = ref("");
     const isModalOpen = ref(false);
+    const isAIReviewProgressOpen = ref(false);
+    const isAIReviewInProgress = ref(false);
+    const aiReviewCompletedCount = ref(0);
+    const aiReviewTotalCount = ref(0);
+    const aiReviewCurrentHash = ref("");
+    const aiReviewProgressMessage = ref("");
+    const aiReviewProgressError = ref("");
+    const aiReviewErrors = ref<string[]>([]);
     const isEditable = config.isEditable;
+    const isAIReviewConfigured = config.isAIReviewConfigured;
     const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: sources.value as Record<string, unknown>[] }));
+    const aiReviewProgressPercent = computed((): number => {
+        if (!aiReviewTotalCount.value) {
+            return 0;
+        }
+
+        return Math.round((aiReviewCompletedCount.value / aiReviewTotalCount.value) * 100);
+    });
+    const gridActions = computed((): GridAction[] => {
+        if (!isEditable || !isAIReviewConfigured) {
+            return [];
+        }
+
+        return [{
+            title: "AI Review",
+            tooltip: "Review selected Lava content with AI",
+            iconCssClass: "ti ti-sparkles",
+            disabled: isAIReviewInProgress.value,
+            handler: reviewSelectedWithAI
+        }];
+    });
 
     async function openApproval(idKey: string | null | undefined): Promise<void> {
         const source = sources.value.find(s => s.idKey === idKey) ?? null;
@@ -123,6 +203,10 @@
         selectedContent.value = "";
         selectedContentHash.value = source.contentHash ?? "";
         selectedSources.value = [];
+        selectedAIReviewDetails.value = source.aiReviewDetails ?? "";
+        selectedAIRiskAssessment.value = source.aiRiskAssessment ?? "";
+        selectedAIHasConcerns.value = source.aiHasVulnerabilityConcerns === true;
+        selectedAIReviewDateTime.value = source.aiReviewDateTime ?? "";
         modalErrorMessage.value = "";
         isModalOpen.value = true;
 
@@ -132,6 +216,10 @@
             selectedContent.value = data.content ?? "";
             selectedContentHash.value = data.contentHash ?? selectedContentHash.value;
             selectedSources.value = data.sources ?? [];
+            selectedAIReviewDetails.value = data.aiReviewDetails ?? selectedAIReviewDetails.value;
+            selectedAIRiskAssessment.value = data.aiRiskAssessment ?? selectedAIRiskAssessment.value;
+            selectedAIHasConcerns.value = data.aiHasVulnerabilityConcerns === true;
+            selectedAIReviewDateTime.value = data.aiReviewDateTime ?? selectedAIReviewDateTime.value;
         }
         else {
             modalErrorMessage.value = result.errorMessage || "Unable to load Lava content.";
@@ -150,6 +238,48 @@
         else {
             modalErrorMessage.value = result.errorMessage || "Unable to approve Lava content.";
         }
+    }
+
+    async function reviewSelectedWithAI(grid: IGridState): Promise<void> {
+        const contentHashes = grid.selectedKeys.filter(k => !!k);
+        if (!contentHashes.length) {
+            errorMessage.value = "Select one or more Lava approval rows before requesting AI review.";
+            return;
+        }
+
+        isAIReviewInProgress.value = true;
+        isAIReviewProgressOpen.value = true;
+        aiReviewCompletedCount.value = 0;
+        aiReviewTotalCount.value = contentHashes.length;
+        aiReviewCurrentHash.value = "";
+        aiReviewProgressError.value = "";
+        aiReviewErrors.value = [];
+        aiReviewProgressMessage.value = "Starting AI review...";
+
+        for (const contentHash of contentHashes) {
+            aiReviewCurrentHash.value = contentHash;
+            aiReviewProgressMessage.value = `Reviewing ${aiReviewCompletedCount.value + 1} of ${aiReviewTotalCount.value}...`;
+
+            const result = await invokeBlockAction("ReviewWithAI", { contentHashes: [contentHash] });
+            if (!result.isSuccess) {
+                aiReviewErrors.value.push(`${contentHash}: ${result.errorMessage || "Unable to review this content."}`);
+            }
+
+            aiReviewCompletedCount.value++;
+        }
+
+        aiReviewCurrentHash.value = "";
+        isAIReviewInProgress.value = false;
+
+        if (aiReviewErrors.value.length) {
+            aiReviewProgressError.value = `${aiReviewErrors.value.length} review${aiReviewErrors.value.length === 1 ? "" : "s"} failed.`;
+            aiReviewProgressMessage.value = "AI review finished with errors. Refreshing results...";
+        }
+        else {
+            aiReviewProgressMessage.value = "AI review complete. Refreshing results...";
+        }
+
+        window.setTimeout(() => reloadBlock(), 1000);
     }
 </script>
 
@@ -189,5 +319,40 @@
     .approval-content pre {
         white-space: pre-wrap;
         word-break: break-word;
+    }
+
+    .ai-review-status {
+        border-radius: 999px;
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 2px 8px;
+        text-transform: capitalize;
+    }
+
+    .risk-low {
+        background: #e6f4ea;
+        color: #137333;
+    }
+
+    .risk-medium,
+    .risk-unknown {
+        background: #fef7e0;
+        color: #b06000;
+    }
+
+    .risk-high {
+        background: #fce8e6;
+        color: #c5221f;
+    }
+
+    .ai-review-progress .progress {
+        margin-bottom: 12px;
+    }
+
+    .ai-review-errors {
+        margin-top: 12px;
+        max-height: 240px;
+        overflow: auto;
     }
 </style>

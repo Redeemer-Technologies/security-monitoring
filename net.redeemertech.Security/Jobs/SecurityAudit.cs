@@ -119,7 +119,7 @@ namespace net.redeemertech.Security
                     EvaluateLavaApprovalsWithAI( rockContext, lavaApprovalOpenAIApiKey, GetAttributeValue( AttributeKey.LavaApprovalOpenAIModel ) );
                 }
 
-                AddHighRiskLavaApprovalSummary( rockContext, checkResults.FirstOrDefault( c => c.Name == "Lava Approvals" ) );
+                AddLavaApprovalRiskSummary( rockContext, checkResults.FirstOrDefault( c => c.Name == "Lava Approvals" ) );
 
                 var passingCheckCount = checkResults.Count( c => c.IsPassing );
                 var jobResult = new StringBuilder();
@@ -127,23 +127,23 @@ namespace net.redeemertech.Security
 
                 foreach ( var checkResult in checkResults )
                 {
-                    jobResult.AppendLine();
-                    jobResult.AppendLine();
+                    //jobResult.AppendLine();
+                    //jobResult.AppendLine();
                     jobResult.AppendLine( checkResult.Summary );
 
-                    if ( checkResult.Details.IsNotNullOrWhiteSpace() )
-                    {
-                        jobResult.AppendLine( checkResult.Details );
-                    }
+                    //if ( checkResult.Details.IsNotNullOrWhiteSpace() )
+                    //{
+                    //    jobResult.AppendLine( checkResult.Details );
+                    //}
 
-                    if ( checkResult.SecurityNotices != null && checkResult.SecurityNotices.Any() )
-                    {
-                        jobResult.AppendLine( "Security Notices:" );
-                        foreach ( var notice in checkResult.SecurityNotices )
-                        {
-                            jobResult.AppendLine( notice );
-                        }
-                    }
+                    //if ( checkResult.SecurityNotices != null && checkResult.SecurityNotices.Any() )
+                    //{
+                    //    jobResult.AppendLine( "Security Notices:" );
+                    //    foreach ( var notice in checkResult.SecurityNotices )
+                    //    {
+                    //        jobResult.AppendLine( notice );
+                    //    }
+                    //}
                 }
 
                 this.Result = jobResult.ToString();
@@ -200,7 +200,7 @@ namespace net.redeemertech.Security
             }
         }
 
-        private void AddHighRiskLavaApprovalSummary( RockContext rockContext, AuditCheckResult lavaApprovalResult )
+        private void AddLavaApprovalRiskSummary( RockContext rockContext, AuditCheckResult lavaApprovalResult )
         {
             if ( lavaApprovalResult == null || lavaApprovalResult.LavaApprovalFindings == null || !lavaApprovalResult.LavaApprovalFindings.Any() )
             {
@@ -213,23 +213,44 @@ namespace net.redeemertech.Security
                     .Where( h => h.IsNotNullOrWhiteSpace() ),
                 StringComparer.OrdinalIgnoreCase );
 
-            var highRiskContentHashes = new LavaApprovalSourceService( rockContext ).Queryable()
+            var riskFindings = new LavaApprovalSourceService( rockContext ).Queryable()
                 .AsNoTracking()
-                .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && s.AIRiskAssessment == "high" )
-                .Select( s => s.ContentHash )
+                .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && ( s.AIRiskAssessment == "high" || s.AIRiskAssessment == "medium" ) )
+                .Select( s => new
+                {
+                    s.ContentHash,
+                    s.AIRiskAssessment,
+                    s.IsPublic
+                } )
                 .ToList()
-                .Where( h => outstandingHashSet.Contains( h ) )
+                .Where( s => outstandingHashSet.Contains( s.ContentHash ) )
+                .ToList();
+
+            var highRiskContentHashes = riskFindings
+                .Where( s => s.AIRiskAssessment == "high" )
+                .Select( s => s.ContentHash )
                 .Distinct( StringComparer.OrdinalIgnoreCase )
                 .OrderBy( h => h )
                 .ToList();
 
-            if ( !highRiskContentHashes.Any() )
-            {
-                return;
-            }
+            var publicHighOrMediumRiskContentHashes = riskFindings
+                .Where( s => s.IsPublic == true )
+                .Select( s => s.ContentHash )
+                .Distinct( StringComparer.OrdinalIgnoreCase )
+                .OrderBy( h => h )
+                .ToList();
 
-            lavaApprovalResult.HighRiskLavaApprovalContentHashes = highRiskContentHashes;
-            lavaApprovalResult.Summary += string.Format( " AI flagged {0} outstanding content hash(es) as high risk.", highRiskContentHashes.Count );
+            var failingContentHashSet = new HashSet<string>( highRiskContentHashes, StringComparer.OrdinalIgnoreCase );
+            failingContentHashSet.UnionWith(
+                riskFindings
+                    .Where( s => s.IsPublic == true && s.AIRiskAssessment == "medium" )
+                    .Select( s => s.ContentHash ) );
+
+            lavaApprovalResult.IsPassing = !failingContentHashSet.Any();
+            lavaApprovalResult.Summary = string.Format(
+                "Lava Approvals: AI flagged {0} unapproved high risk content hash(es). {1} unapproved public high or medium risk content hash(es) are waiting for approval.",
+                highRiskContentHashes.Count,
+                publicHighOrMediumRiskContentHashes.Count );
         }
 
         private AuditCheckResult AuditBinaryFileTypeSecurity( RockContext rockContext )
@@ -611,11 +632,11 @@ namespace net.redeemertech.Security
 
             return new AuditCheckResult
             {
-                Name = "SQL Injection Content",
+                Name = "SQL/XSS Injection Content",
                 IsPassing = !findings.Any(),
                 Summary = findings.Any()
-                    ? string.Format( "SQL Injection Content: {0} Person or Location rows contain '<script'.", findings.Count )
-                    : "SQL Injection Content: no Person or Location rows contain '<script'.",
+                    ? string.Format( "SQL/XSS Injection Content: {0} Person or Location rows contain injection content.", findings.Count )
+                    : "SQL/XSS Injection Content: no Person or Location rows contain injection content.",
                 Details = details.ToString(),
                 SqlInjectionContentFindings = findings
             };
@@ -685,9 +706,9 @@ namespace net.redeemertech.Security
             return new AuditCheckResult
             {
                 Name = "Lava Approvals",
-                IsPassing = !unapprovedSources.Any(),
+                IsPassing = true,
                 Summary = unapprovedSources.Any()
-                    ? string.Format( "Lava Approvals: {0} unapproved content hash(es) appear in {1} source row(s).", unapprovedContentHashCount, unapprovedSources.Count )
+                    ? string.Format( "Lava Approvals: {0} unapproved approval-required content hash(es) are waiting for AI risk review.", unapprovedContentHashCount )
                     : "Lava Approvals: no unapproved approval-required Lava was found.",
                 Details = details.ToString(),
                 LavaApprovalFindings = unapprovedSources
@@ -1692,7 +1713,7 @@ namespace net.redeemertech.Security
 
             foreach ( var checkResult in checkResults )
             {
-                if (checkResult.IsPassing == false)
+                if ( checkResult.IsPassing == false && checkResult.Name != "Lava Approvals" )
                 {
                     html.AppendFormat( "<h3>{0}</h3>", HttpUtility.HtmlEncode( checkResult.Name ) );
 
@@ -1719,10 +1740,6 @@ namespace net.redeemertech.Security
                     else if ( checkResult.Name == "SQL Injection Content" )
                     {
                         html.Append( BuildSqlInjectionContentDetailsHtml( checkResult.SqlInjectionContentFindings ) );
-                    }
-                    else if ( checkResult.Name == "Lava Approvals" )
-                    {
-                        html.Append( BuildLavaApprovalDetailsHtml( checkResult.LavaApprovalFindings, checkResult.HighRiskLavaApprovalContentHashes ) );
                     }
                     else if ( checkResult.Details.IsNotNullOrWhiteSpace() )
                     {
@@ -1931,43 +1948,6 @@ namespace net.redeemertech.Security
             return html.ToString();
         }
 
-        private string BuildLavaApprovalDetailsHtml( List<LavaApprovalFinding> findings, List<string> highRiskContentHashes )
-        {
-            if ( findings == null || !findings.Any() )
-            {
-                return "<p>No unapproved approval-required Lava was found.</p>";
-            }
-
-            var html = new StringBuilder();
-
-            if ( highRiskContentHashes != null && highRiskContentHashes.Any() )
-            {
-                html.AppendFormat(
-                    "<p style='background-color:#f8d7da;border:1px solid #f5c2c7;color:#842029;padding:12px;'><strong>AI High Risk:</strong> AI flagged {0} outstanding Lava approval content hash(es) as high risk: {1}</p>",
-                    highRiskContentHashes.Count,
-                    HttpUtility.HtmlEncode( string.Join( ", ", highRiskContentHashes ) ) );
-            }
-
-            html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;'>" );
-            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Content Hash</th><th align='right' style='border-bottom:1px solid #ddd;'>Places</th><th align='left' style='border-bottom:1px solid #ddd;'>Preview</th><th align='left' style='border-bottom:1px solid #ddd;'>Locations</th></tr></thead><tbody>" );
-
-            foreach ( var group in findings.GroupBy( f => f.ContentHash, StringComparer.OrdinalIgnoreCase ).OrderBy( g => g.Key ) )
-            {
-                var firstFinding = group.First();
-                var locations = string.Join( ", ", group.OrderBy( f => f.TableName ).ThenBy( f => f.ColumnName ).ThenBy( f => f.RowId ).Select( f => string.Format( "{0}.{1} #{2}", f.TableName, f.ColumnName, f.RowId ) ) );
-
-                html.AppendFormat(
-                    "<tr><td style='border-bottom:1px solid #eee;'>{0}</td><td align='right' style='border-bottom:1px solid #eee;'>{1}</td><td style='border-bottom:1px solid #eee;'>{2}</td><td style='border-bottom:1px solid #eee;'>{3}</td></tr>",
-                    HttpUtility.HtmlEncode( group.Key ),
-                    group.Count(),
-                    HttpUtility.HtmlEncode( firstFinding.ContentPreview ),
-                    HttpUtility.HtmlEncode( locations ) );
-            }
-
-            html.Append( "</tbody></table>" );
-            return html.ToString();
-        }
-
         private class AuditCheckResult
         {
             public string Name { get; set; }
@@ -1991,8 +1971,6 @@ namespace net.redeemertech.Security
             public List<SqlInjectionContentFinding> SqlInjectionContentFindings { get; set; }
 
             public List<LavaApprovalFinding> LavaApprovalFindings { get; set; }
-
-            public List<string> HighRiskLavaApprovalContentHashes { get; set; }
 
             public List<string> SecurityNotices { get; set; }
         }

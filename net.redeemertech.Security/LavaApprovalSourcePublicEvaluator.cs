@@ -115,8 +115,10 @@ namespace net.redeemertech.Security
 
         private bool AllowsPublicView( ISecured secured )
         {
-            return secured.IsAuthorized( Authorization.VIEW, null )
-                || Authorization.Authorized( secured, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers );
+            var tempPerson = new Person();
+            tempPerson.Guid = Guid.Empty;
+            tempPerson.Id = 0;
+            return Authorization.Authorized(secured, Authorization.VIEW, tempPerson);
         }
 
         private class AttributeValueEntityContext

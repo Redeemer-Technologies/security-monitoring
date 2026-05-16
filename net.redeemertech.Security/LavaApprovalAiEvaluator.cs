@@ -261,6 +261,8 @@ In Rock Lava, {% sql %}{% endsql %} tags allow SQL to run in the template. Liqui
 Tags such as {% person %}, or other tags that start with {% %} and then a Rock entity name, are entity tags and can query the database. Expressions or where clauses on those entity tags generally need an explicit permission check
 to ensure the current user has permissions to access the data that is returned. The RunLava filter is another security risk to pay attention to, because if the input to RunLava is untrusted, it could allow any Lava to run, including new SQL tags or script tags.
 RunLava runs the lava passed in with the permissions context of the script that runs it.
+If we're doing SQL inserts or updates on strings, even if the input is sanitized from a SQL perspective by using SanitizeSql or SQL parameters, there's the possiblity that the content
+could contain scripts, Lava, or HTML that could later be rendered in an unsafe way. So that could be a concern even if the SQL is safe, though not the foremost concern.
 Treat direct script output, unsafe HTML rendering, unsanitized request/query/form values, dynamic SQL, and entity queries without permissions checks as concerns.";
         }
 

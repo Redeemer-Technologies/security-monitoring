@@ -29,7 +29,7 @@ using Rock.Lava;
 namespace net.redeemertech.Security
 {
     [DisplayName( "Security Audit" )]
-    [Description( "Audits Rock security settings, security role membership, binary file type view permissions, document type view permissions, and workflow type view permissions." )]
+    [Description( "Audits Rock security settings, security role membership, binary file type view permissions, document type view permissions, workflow entry block configuration, and workflow type view permissions." )]
     [BinaryFileTypesField( "Binary File Types To Ignore",
         "A whitelist of binary file types that should be open to the public and should not be included in this audit.",
         false,
@@ -41,22 +41,28 @@ namespace net.redeemertech.Security
         key: AttributeKey.DocumentTypesToIgnore,
         order: 1,
         AllowMultiple = true )]
+    [WorkflowTypeField( "Workflow Types To Ignore",
+        "A whitelist of workflow types that should be open to the public and should not be included in the Workflow Security audit.",
+        allowMultiple: true,
+        required: false,
+        key: AttributeKey.WorkflowTypesToIgnore,
+        order: 2 )]
     [TextField( "Results Email Addresses",
         "A comma-delimited list of email addresses that should receive the formatted security audit results. Leave the standard job notification status set to None to avoid duplicate built-in job notification emails.",
         false,
         key: AttributeKey.ResultsEmailAddresses,
-        order: 2 )]
+        order: 3 )]
     [EncryptedTextField( "Lava Approval OpenAI API Key",
         "The OpenAI API key to use for evaluating Lava approval content for XSS and SQL injection concerns. Leave blank to skip AI evaluation during this job.",
         false,
         key: AttributeKey.LavaApprovalOpenAIApiKey,
-        order: 3,
+        order: 4,
         isPassword: true )]
     [TextField( "Lava Approval OpenAI Model",
         "The OpenAI model name to use when evaluating Lava approval content. Defaults to gpt-4o-mini if blank.",
         false,
         key: AttributeKey.LavaApprovalOpenAIModel,
-        order: 4 )]
+        order: 5 )]
     [DisallowConcurrentExecution]
     public class SecurityAudit : RockJob
     {
@@ -78,6 +84,8 @@ namespace net.redeemertech.Security
             public const string BinaryFileTypesToIgnore = "BinaryFileTypesToIgnore";
 
             public const string DocumentTypesToIgnore = "DocumentTypesToIgnore";
+
+            public const string WorkflowTypesToIgnore = "WorkflowTypesToIgnore";
 
             public const string ResultsEmailAddresses = "ResultsEmailAddresses";
 
@@ -101,6 +109,7 @@ namespace net.redeemertech.Security
                     AuditUnapprovedLavaScripts( rockContext ),
                     AuditBinaryFileTypeSecurity( rockContext ),
                     AuditDocumentTypeSecurity( rockContext ),
+                    AuditWorkflowSecurity( rockContext ),
                     AuditAddPersonToGroupWorkflowSecurity( rockContext )
                 };
 
@@ -252,6 +261,7 @@ namespace net.redeemertech.Security
                     Name = f.Name,
                     RequiresViewSecurity = f.RequiresViewSecurity,
                     AllowsPublicView = f.IsAuthorized( Authorization.VIEW, null ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( f, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ),
                     FileCount = fileCountsByFileTypeId.ContainsKey( f.Id ) ? fileCountsByFileTypeId[f.Id] : 0
                 } )
                 .ToList();
@@ -317,6 +327,7 @@ namespace net.redeemertech.Security
                     Name = d.Name,
                     EntityType = d.EntityType != null ? d.EntityType.FriendlyName : string.Empty,
                     AllowsPublicView = d.IsAuthorized( Authorization.VIEW, null ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( d, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ),
                     DocumentCount = documentCountsByDocumentTypeId.ContainsKey( d.Id ) ? documentCountsByDocumentTypeId[d.Id] : 0
                 } )
                 .ToList();
@@ -352,6 +363,120 @@ namespace net.redeemertech.Security
                     ignoredDocumentTypeGuids.Count ),
                 Details = details.ToString(),
                 InsecureDocumentTypes = insecureDocumentTypes
+            };
+        }
+
+        private AuditCheckResult AuditWorkflowSecurity( RockContext rockContext )
+        {
+            var ignoredWorkflowTypeGuids =
+                ( GetAttributeValue( AttributeKey.WorkflowTypesToIgnore ) ?? string.Empty )
+                    .SplitDelimitedValues()
+                    .AsGuidList();
+
+            var workflowEntryBlockIdsWithNoWorkflowType = rockContext.Database.SqlQuery<int>( @"
+                DECLARE @BlockEntityTypeId INT = (SELECT [Id] FROM [EntityType] WHERE [Name] = 'Rock.Model.Block')
+
+                SELECT DISTINCT [Block].[Id]
+                FROM [Block]
+                INNER JOIN [BlockType] ON [BlockType].[Id] = [Block].[BlockTypeId]
+                LEFT JOIN [Attribute] [WorkflowTypeAttribute]
+                    ON [WorkflowTypeAttribute].[EntityTypeId] = @BlockEntityTypeId
+                    AND [WorkflowTypeAttribute].[EntityTypeQualifierColumn] = 'BlockTypeId'
+                    AND [WorkflowTypeAttribute].[EntityTypeQualifierValue] = CONVERT(VARCHAR(10), [Block].[BlockTypeId])
+                    AND [WorkflowTypeAttribute].[Key] = 'WorkflowType'
+                LEFT JOIN [AttributeValue] [WorkflowTypeValue]
+                    ON [WorkflowTypeValue].[AttributeId] = [WorkflowTypeAttribute].[Id]
+                    AND [WorkflowTypeValue].[EntityId] = [Block].[Id]
+                WHERE [Block].[PageId] IS NOT NULL
+                AND ( [BlockType].[Guid] = 'A8BD05C8-6F89-4628-845B-059E686F089A' OR [BlockType].[Guid] = '9116AAD8-CF16-4BCE-B0CF-5B4D565710ED' )
+                AND (
+                    [WorkflowTypeAttribute].[Id] IS NULL
+                    OR COALESCE(NULLIF([WorkflowTypeValue].[Value], ''), NULLIF([WorkflowTypeAttribute].[DefaultValue], '')) IS NULL
+                )" )
+                .ToList();
+
+            var exposedWorkflowEntryBlocks = new BlockService( rockContext ).Queryable()
+                .Include( b => b.BlockType )
+                .Include( b => b.Page )
+                .Where( b => workflowEntryBlockIdsWithNoWorkflowType.Contains( b.Id ) )
+                .ToList()
+                .Where( b =>
+                    b.Page != null &&
+                    ( b.IsAuthorized( Authorization.VIEW, null ) || Authorization.Authorized( b, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ) ) &&
+                    ( b.Page.IsAuthorized( Authorization.VIEW, null ) || Authorization.Authorized( b.Page, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ) ) )
+                .OrderBy( b => b.Page.InternalName )
+                .ThenBy( b => b.Name )
+                .Select( b => new WorkflowEntryBlockAuditResult
+                {
+                    Id = b.Id,
+                    Guid = b.Guid.ToString(),
+                    Name = b.Name,
+                    BlockType = b.BlockType != null ? b.BlockType.Name : string.Empty,
+                    PageId = b.Page.Id,
+                    PageGuid = b.Page.Guid.ToString(),
+                    PageName = b.Page.InternalName
+                } )
+                .ToList();
+
+            var workflowTypeAuditResults = new WorkflowTypeService( rockContext ).Queryable()
+                .Where( w => !ignoredWorkflowTypeGuids.Contains( w.Guid ) )
+                .OrderBy( w => w.Name )
+                .ToList()
+                .Select( w => new WorkflowTypeAuditResult
+                {
+                    Id = w.Id,
+                    Guid = w.Guid.ToString(),
+                    Name = w.Name,
+                    AllowsAllUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllUsers ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers )
+                } )
+                .ToList();
+
+            var insecureWorkflowTypes = workflowTypeAuditResults
+                .Where( w => !w.IsSecure )
+                .ToList();
+
+            var secureWorkflowTypeCount = workflowTypeAuditResults.Count - insecureWorkflowTypes.Count;
+            var details = new StringBuilder();
+
+            foreach ( var block in exposedWorkflowEntryBlocks )
+            {
+                details.AppendLine();
+                details.AppendFormat(
+                    "{0} (Id: {1}, Guid: {2}) on page {3} (Id: {4}, Guid: {5}) is viewable by All Users or All Authenticated Users and does not have Workflow Type set.",
+                    block.Name,
+                    block.Id,
+                    block.Guid,
+                    block.PageName,
+                    block.PageId,
+                    block.PageGuid );
+            }
+
+            foreach ( var workflowType in insecureWorkflowTypes )
+            {
+                details.AppendLine();
+                details.AppendFormat(
+                    "{0} (Id: {1}, Guid: {2}) is not secure. Reasons: {3}.",
+                    workflowType.Name,
+                    workflowType.Id,
+                    workflowType.Guid,
+                    string.Join( "; ", workflowType.Reasons ) );
+            }
+
+            return new AuditCheckResult
+            {
+                Name = "Workflow Security",
+                IsPassing = !exposedWorkflowEntryBlocks.Any() && !insecureWorkflowTypes.Any(),
+                Summary = string.Format(
+                    "Workflow Security: {0} exposed workflow entry blocks do not have Workflow Type set. {1} of {2} checked workflow types are secure. {3} workflow types allow All Users or All Authenticated Users to view the workflow type. {4} workflow types were ignored.",
+                    exposedWorkflowEntryBlocks.Count,
+                    secureWorkflowTypeCount,
+                    workflowTypeAuditResults.Count,
+                    insecureWorkflowTypes.Count,
+                    ignoredWorkflowTypeGuids.Count ),
+                Details = details.ToString(),
+                InsecureWorkflowEntryBlocks = exposedWorkflowEntryBlocks,
+                InsecureWorkflowTypes = insecureWorkflowTypes
             };
         }
 
@@ -1479,6 +1604,10 @@ namespace net.redeemertech.Security
                     {
                         html.Append( BuildDocumentTypeDetailsHtml( checkResult.InsecureDocumentTypes ) );
                     }
+                    else if ( checkResult.Name == "Workflow Security" )
+                    {
+                        html.Append( BuildWorkflowSecurityDetailsHtml( checkResult.InsecureWorkflowEntryBlocks, checkResult.InsecureWorkflowTypes ) );
+                    }
                     else if ( checkResult.Name == "Add Person To Group Workflow Security" )
                     {
                         html.Append( BuildWorkflowTypeDetailsHtml( checkResult.InsecureWorkflowTypes ) );
@@ -1584,6 +1713,44 @@ namespace net.redeemertech.Security
                     documentType.DocumentCount,
                     HttpUtility.HtmlEncode( string.Join( "; ", documentType.Reasons ) ),
                     HttpUtility.HtmlEncode( documentType.Guid ) );
+            }
+
+            html.Append( "</tbody></table>" );
+            return html.ToString();
+        }
+
+        private string BuildWorkflowSecurityDetailsHtml( List<WorkflowEntryBlockAuditResult> insecureWorkflowEntryBlocks, List<WorkflowTypeAuditResult> insecureWorkflowTypes )
+        {
+            var html = new StringBuilder();
+
+            html.Append( "<h4>Exposed Workflow Entry Blocks Without Workflow Type</h4>" );
+            html.Append( BuildWorkflowEntryBlockDetailsHtml( insecureWorkflowEntryBlocks ) );
+            html.Append( "<h4>Public Workflow Types</h4>" );
+            html.Append( BuildWorkflowTypeDetailsHtml( insecureWorkflowTypes ) );
+
+            return html.ToString();
+        }
+
+        private string BuildWorkflowEntryBlockDetailsHtml( List<WorkflowEntryBlockAuditResult> insecureWorkflowEntryBlocks )
+        {
+            if ( insecureWorkflowEntryBlocks == null || !insecureWorkflowEntryBlocks.Any() )
+            {
+                return "<p>No exposed workflow entry blocks without Workflow Type were found.</p>";
+            }
+
+            var html = new StringBuilder();
+            html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;margin-bottom:16px;'>" );
+            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Block</th><th align='left' style='border-bottom:1px solid #ddd;'>Block Type</th><th align='left' style='border-bottom:1px solid #ddd;'>Page</th><th align='left' style='border-bottom:1px solid #ddd;'>Block Guid</th><th align='left' style='border-bottom:1px solid #ddd;'>Page Guid</th></tr></thead><tbody>" );
+
+            foreach ( var block in insecureWorkflowEntryBlocks )
+            {
+                html.AppendFormat(
+                    "<tr><td style='border-bottom:1px solid #eee;'>{0}</td><td style='border-bottom:1px solid #eee;'>{1}</td><td style='border-bottom:1px solid #eee;'>{2}</td><td style='border-bottom:1px solid #eee;'>{3}</td><td style='border-bottom:1px solid #eee;'>{4}</td></tr>",
+                    HttpUtility.HtmlEncode( block.Name ),
+                    HttpUtility.HtmlEncode( block.BlockType ),
+                    HttpUtility.HtmlEncode( block.PageName ),
+                    HttpUtility.HtmlEncode( block.Guid ),
+                    HttpUtility.HtmlEncode( block.PageGuid ) );
             }
 
             html.Append( "</tbody></table>" );
@@ -1714,6 +1881,8 @@ namespace net.redeemertech.Security
             public List<FileTypeAuditResult> InsecureFileTypes { get; set; }
 
             public List<DocumentTypeAuditResult> InsecureDocumentTypes { get; set; }
+
+            public List<WorkflowEntryBlockAuditResult> InsecureWorkflowEntryBlocks { get; set; }
 
             public List<WorkflowTypeAuditResult> InsecureWorkflowTypes { get; set; }
 
@@ -1976,13 +2145,15 @@ namespace net.redeemertech.Security
 
             public bool AllowsPublicView { get; set; }
 
+            public bool AllowsAllAuthenticatedUsersView { get; set; }
+
             public int FileCount { get; set; }
 
             public bool IsSecure
             {
                 get
                 {
-                    return RequiresViewSecurity && !AllowsPublicView;
+                    return RequiresViewSecurity && !AllowsPublicView && !AllowsAllAuthenticatedUsersView;
                 }
             }
 
@@ -1998,6 +2169,11 @@ namespace net.redeemertech.Security
                     if ( AllowsPublicView )
                     {
                         yield return "View is allowed to the public";
+                    }
+
+                    if ( AllowsAllAuthenticatedUsersView )
+                    {
+                        yield return "View is allowed to All Authenticated Users";
                     }
                 }
             }
@@ -2015,13 +2191,15 @@ namespace net.redeemertech.Security
 
             public bool AllowsPublicView { get; set; }
 
+            public bool AllowsAllAuthenticatedUsersView { get; set; }
+
             public int DocumentCount { get; set; }
 
             public bool IsSecure
             {
                 get
                 {
-                    return !AllowsPublicView;
+                    return !AllowsPublicView && !AllowsAllAuthenticatedUsersView;
                 }
             }
 
@@ -2033,8 +2211,30 @@ namespace net.redeemertech.Security
                     {
                         yield return "View is allowed to the public";
                     }
+
+                    if ( AllowsAllAuthenticatedUsersView )
+                    {
+                        yield return "View is allowed to All Authenticated Users";
+                    }
                 }
             }
+        }
+
+        private class WorkflowEntryBlockAuditResult
+        {
+            public int Id { get; set; }
+
+            public string Guid { get; set; }
+
+            public string Name { get; set; }
+
+            public string BlockType { get; set; }
+
+            public int PageId { get; set; }
+
+            public string PageGuid { get; set; }
+
+            public string PageName { get; set; }
         }
 
         private class WorkflowTypeAuditResult

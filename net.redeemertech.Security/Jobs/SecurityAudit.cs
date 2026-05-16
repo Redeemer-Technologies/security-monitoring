@@ -388,6 +388,7 @@ namespace net.redeemertech.Security
 
         private AuditCheckResult AuditWorkflowSecurity( RockContext rockContext )
         {
+            var publicEvaluator = new LavaApprovalSourcePublicEvaluator();
             var ignoredWorkflowTypeGuids =
                 ( GetAttributeValue( AttributeKey.WorkflowTypesToIgnore ) ?? string.Empty )
                     .SplitDelimitedValues()
@@ -420,10 +421,7 @@ namespace net.redeemertech.Security
                 .Include( b => b.Page )
                 .Where( b => workflowEntryBlockIdsWithNoWorkflowType.Contains( b.Id ) )
                 .ToList()
-                .Where( b =>
-                    b.Page != null &&
-                    ( b.IsAuthorized( Authorization.VIEW, null ) || Authorization.Authorized( b, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ) ) &&
-                    ( b.Page.IsAuthorized( Authorization.VIEW, null ) || Authorization.Authorized( b.Page, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ) ) )
+                .Where( publicEvaluator.IsWorkflowEntryBlockPublic )
                 .OrderBy( b => b.Page.InternalName )
                 .ThenBy( b => b.Name )
                 .Select( b => new WorkflowEntryBlockAuditResult
@@ -652,6 +650,7 @@ namespace net.redeemertech.Security
                 ScanLavaApprovalTarget( rockContext, target, timingDetails, shortcodeTags );
             }
 
+            RefreshLavaApprovalSourcePublicStatuses( rockContext );
             UpdatePublicLavaShortcodeSources( rockContext );
 
             var approvedContentHashes = new LavaApprovalService( rockContext ).Queryable()
@@ -813,7 +812,6 @@ namespace net.redeemertech.Security
             table.Columns.Add( "SourceChecksum", typeof( long ) );
             table.Columns.Add( "ContentHash", typeof( string ) );
             table.Columns.Add( "HasApprovalRequiredLava", typeof( bool ) );
-            table.Columns.Add( "IsPublic", typeof( bool ) );
             table.Columns.Add( "ReferencedShortcodes", typeof( string ) );
             table.Columns.Add( "ContentPreview", typeof( string ) );
             table.Columns.Add( "ScannedDateTime", typeof( DateTime ) );
@@ -837,7 +835,6 @@ namespace net.redeemertech.Security
             var scannedDateTime = RockDateTime.Now;
             var publicEvaluator = new LavaApprovalSourcePublicEvaluator();
 
-            using ( var publicRockContext = new RockContext() )
             using ( var command = connection.CreateCommand() )
             {
                 command.CommandText = target.GetChangedRowsSql( LavaApprovalScanBatchSize );
@@ -871,10 +868,8 @@ namespace net.redeemertech.Security
                         string contentHash = null;
                         string contentPreview = null;
                         string referencedShortcodes = null;
-                        bool? isPublic = null;
                         if ( hasApprovalRequiredLava )
                         {
-                            isPublic = publicEvaluator.DetermineIsPublic( publicRockContext, target.TableName, rowId );
                             referencedShortcodes = string.Join( "|", publicEvaluator.GetReferencedShortcodes( content, shortcodeTags ) );
                         }
 
@@ -900,7 +895,6 @@ namespace net.redeemertech.Security
                             sourceChecksum.HasValue ? ( object ) sourceChecksum.Value : DBNull.Value,
                             contentHash ?? ( object ) DBNull.Value,
                             hasApprovalRequiredLava,
-                            isPublic.HasValue ? ( object ) isPublic.Value : DBNull.Value,
                             referencedShortcodes != null ? ( object ) referencedShortcodes : DBNull.Value,
                             contentPreview ?? ( object ) DBNull.Value,
                             scannedDateTime );
@@ -930,7 +924,6 @@ namespace net.redeemertech.Security
                         [SourceChecksum] [bigint] NULL,
                         [ContentHash] [nvarchar](64) NULL,
                         [HasApprovalRequiredLava] [bit] NOT NULL,
-                        [IsPublic] [bit] NULL,
                         [ReferencedShortcodes] [nvarchar](max) NULL,
                         [ContentPreview] [nvarchar](max) NULL,
                         [ScannedDateTime] [datetime] NOT NULL,
@@ -980,6 +973,23 @@ namespace net.redeemertech.Security
             rockContext.SaveChanges();
         }
 
+        private void RefreshLavaApprovalSourcePublicStatuses( RockContext rockContext )
+        {
+            var publicEvaluator = new LavaApprovalSourcePublicEvaluator();
+            var publicWorkflowEntryWorkflowTypeIds = publicEvaluator.GetPublicWorkflowEntryWorkflowTypeIds( rockContext );
+            var approvalSourceService = new LavaApprovalSourceService( rockContext );
+            var approvalSources = approvalSourceService.Queryable().ToList();
+
+            foreach ( var approvalSource in approvalSources )
+            {
+                approvalSource.IsPublic = approvalSource.HasApprovalRequiredLava
+                    ? publicEvaluator.DetermineIsPublic( rockContext, approvalSource.TableName, approvalSource.RowId, publicWorkflowEntryWorkflowTypeIds )
+                    : null;
+            }
+
+            rockContext.SaveChanges();
+        }
+
         private List<string> GetLavaShortcodeTags( RockContext rockContext )
         {
             return rockContext.Database.SqlQuery<string>( @"
@@ -1004,7 +1014,6 @@ namespace net.redeemertech.Security
                 bulkCopy.ColumnMappings.Add( "SourceChecksum", "SourceChecksum" );
                 bulkCopy.ColumnMappings.Add( "ContentHash", "ContentHash" );
                 bulkCopy.ColumnMappings.Add( "HasApprovalRequiredLava", "HasApprovalRequiredLava" );
-                bulkCopy.ColumnMappings.Add( "IsPublic", "IsPublic" );
                 bulkCopy.ColumnMappings.Add( "ReferencedShortcodes", "ReferencedShortcodes" );
                 bulkCopy.ColumnMappings.Add( "ContentPreview", "ContentPreview" );
                 bulkCopy.ColumnMappings.Add( "ScannedDateTime", "ScannedDateTime" );
@@ -1040,7 +1049,6 @@ namespace net.redeemertech.Security
                         target.[SourceChecksum] = stage.[SourceChecksum],
                         target.[ContentHash] = stage.[ContentHash],
                         target.[HasApprovalRequiredLava] = stage.[HasApprovalRequiredLava],
-                        target.[IsPublic] = stage.[IsPublic],
                         target.[ReferencedShortcodes] = stage.[ReferencedShortcodes],
                         target.[ContentPreview] = stage.[ContentPreview],
                         target.[LastScannedDateTime] = stage.[ScannedDateTime],
@@ -1065,7 +1073,6 @@ namespace net.redeemertech.Security
                         [SourceChecksum],
                         [ContentHash],
                         [HasApprovalRequiredLava],
-                        [IsPublic],
                         [ReferencedShortcodes],
                         [ContentPreview],
                         [LastScannedDateTime],
@@ -1081,7 +1088,6 @@ namespace net.redeemertech.Security
                         stage.[SourceChecksum],
                         stage.[ContentHash],
                         stage.[HasApprovalRequiredLava],
-                        stage.[IsPublic],
                         stage.[ReferencedShortcodes],
                         stage.[ContentPreview],
                         stage.[ScannedDateTime],
@@ -1857,7 +1863,7 @@ namespace net.redeemertech.Security
 
             var html = new StringBuilder();
             html.Append( "<table cellpadding='8' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;margin-bottom:16px;'>" );
-            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Block</th><th align='left' style='border-bottom:1px solid #ddd;'>Block Type</th><th align='left' style='border-bottom:1px solid #ddd;'>Page</th><th align='left' style='border-bottom:1px solid #ddd;'>Block Guid</th><th align='left' style='border-bottom:1px solid #ddd;'>Page Guid</th></tr></thead><tbody>" );
+            html.Append( "<thead><tr><th align='left' style='border-bottom:1px solid #ddd;'>Block</th><th align='left' style='border-bottom:1px solid #ddd;'>Block Type</th><th align='left' style='border-bottom:1px solid #ddd;'>Page</th><th align='left' style='border-bottom:1px solid #ddd;'>Block Guid</th><th align='left' style='border-bottom:1px solid #ddd;'>Page Id</th></tr></thead><tbody>" );
 
             foreach ( var block in insecureWorkflowEntryBlocks )
             {
@@ -1867,7 +1873,7 @@ namespace net.redeemertech.Security
                     HttpUtility.HtmlEncode( block.BlockType ),
                     HttpUtility.HtmlEncode( block.PageName ),
                     HttpUtility.HtmlEncode( block.Guid ),
-                    HttpUtility.HtmlEncode( block.PageGuid ) );
+                    HttpUtility.HtmlEncode( block.PageId ) );
             }
 
             html.Append( "</tbody></table>" );

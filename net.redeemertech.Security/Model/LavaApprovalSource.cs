@@ -39,6 +39,12 @@ namespace net.redeemertech.Security.Model
         public bool HasApprovalRequiredLava { get; set; }
 
         [DataMember]
+        public bool? IsPublic { get; set; }
+
+        [DataMember]
+        public string ReferencedShortcodes { get; set; }
+
+        [DataMember]
         public string ContentPreview { get; set; }
 
         [DataMember]

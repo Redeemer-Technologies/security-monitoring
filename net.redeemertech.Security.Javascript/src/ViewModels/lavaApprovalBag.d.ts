@@ -12,6 +12,7 @@ export type LavaApprovalBag = {
     matchingSourceCount: number;
     matchingSourceSortValue?: string | null;
     isApproved: boolean;
+    isPublic?: boolean | null;
     aiReviewDateTime?: string | null;
     aiReviewProvider?: string | null;
     aiReviewModel?: string | null;
@@ -19,6 +20,8 @@ export type LavaApprovalBag = {
     aiRiskAssessment?: string | null;
     aiRiskSortOrder: number;
     aiReviewDetails?: string | null;
+    shortcodeAiRiskAssessment?: string | null;
+    shortcodeAiRiskSortOrder: number;
     entityDetails?: LavaApprovalEntityDetailBag[] | null;
 };
 

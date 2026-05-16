@@ -45,6 +45,21 @@
                         visiblePriority="sm"
                         width="10%" />
 
+            <Column name="isPublic"
+                    title="Public"
+                    sortValue="{{ row.isPublic ? '2' : row.isPublic === false ? '1' : '0' }}"
+                    filterValue="{{ row.isPublic ? 'Yes' : row.isPublic === false ? 'No' : 'Unknown' }}"
+                    quickFilterValue="{{ row.isPublic ? 'Yes' : row.isPublic === false ? 'No' : 'Unknown' }}"
+                    :filter="pickExistingValueFilter"
+                    visiblePriority="sm"
+                    width="8%">
+                <template #format="{ row }">
+                    <span v-if="row.isPublic" class="public-status">Public</span>
+                    <span v-else-if="row.isPublic === false">No</span>
+                    <span v-else class="text-muted">Unknown</span>
+                </template>
+            </Column>
+
             <Column name="aiReview"
                     title="AI Review"
                     sortValue="{{ row.aiRiskSortOrder }}"
@@ -62,6 +77,22 @@
                 </template>
             </Column>
 
+            <Column name="shortcodeAiReview"
+                    title="Shortcode Risk"
+                    sortValue="{{ row.shortcodeAiRiskSortOrder }}"
+                    filterValue="{{ row.shortcodeAiRiskAssessment }}"
+                    quickFilterValue="{{ row.shortcodeAiRiskAssessment }}"
+                    field="shortcodeAiRiskAssessment"
+                    :filter="pickExistingValueFilter"
+                    visiblePriority="sm"
+                    width="10%">
+                <template #format="{ row }">
+                    <span v-if="row.shortcodeAiRiskAssessment" class="ai-review-status" :class="`risk-${row.shortcodeAiRiskAssessment ?? 'unknown'}`">
+                        {{ row.shortcodeAiRiskAssessment }}
+                    </span>
+                </template>
+            </Column>
+
             <Column v-if="isEditable" name="approve" title="Approve" width="5%">
                 <template #format="{ row }">
                     <RockButton btnType="primary" @click.stop="approveRow(row.idKey)">Approve</RockButton>
@@ -76,13 +107,20 @@
                 <dl>
                     <dt>Source</dt>
                     <dd>{{ selectedSource.matchingSourceCount }} place{{ selectedSource.matchingSourceCount === 1 ? "" : "s" }}</dd>
+                    <dt>Public</dt>
+                    <dd>{{ selectedSource.isPublic ? "Yes" : selectedSource.isPublic === false ? "No" : "Unknown" }}</dd>
                     <dt>Content Hash</dt>
                     <dd><code>{{ selectedContentHash }}</code></dd>
                 </dl>
 
                 <NotificationBox v-if="selectedAIRiskAssessment == 'high'" :alertType="AlertType.Danger">
                     <strong>High Risk:</strong>
-                    This Lava content has been identified as high risk by AI review. Exercise caution when approving or using this content.
+                    This Lava content has been identified as high risk by AI review or raised because it is public. Exercise caution when approving or using this content.
+                </NotificationBox>
+
+                <NotificationBox v-if="selectedAIRiskAssessment == 'urgent'" :alertType="AlertType.Danger">
+                    <strong>Urgent Risk:</strong>
+                    This Lava content is public and has been raised from high risk by AI review. Exercise caution when approving or using this content.
                 </NotificationBox>
 
                 <NotificationBox v-if="selectedAIReviewDetails" :alertType="selectedAIHasConcerns ? AlertType.Warning : AlertType.Info">
@@ -96,6 +134,8 @@
                     <thead>
                         <tr>
                             <th>Location</th>
+                            <th>Public</th>
+                            <th>Shortcode Risk</th>
                             <th>Detected</th>
                         </tr>
                     </thead>
@@ -112,6 +152,16 @@
                                         </dd>
                                     </template>
                                 </dl>
+                            </td>
+                            <td>
+                                <span v-if="source.isPublic" class="public-status">Public</span>
+                                <span v-else-if="source.isPublic === false">No</span>
+                                <span v-else class="text-muted">Unknown</span>
+                            </td>
+                            <td>
+                                <span v-if="source.shortcodeAiRiskAssessment" class="ai-review-status" :class="`risk-${source.shortcodeAiRiskAssessment ?? 'unknown'}`">
+                                    {{ source.shortcodeAiRiskAssessment }}
+                                </span>
                             </td>
                             <td>{{ source.detectedDateTime }}</td>
                         </tr>
@@ -446,6 +496,18 @@
     .risk-high {
         background: #fce8e6;
         color: #c5221f;
+    }
+
+    .risk-urgent,
+    .public-status {
+        background: #fce8e6;
+        border-radius: 999px;
+        color: #8b0000;
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 2px 8px;
+        text-transform: capitalize;
     }
 
     .ai-review-progress .progress {

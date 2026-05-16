@@ -81,16 +81,19 @@ namespace net.redeemertech.Security.Blocks.Blocks
 
             var firstSource = currentSources.First();
             var content = GetCurrentSourceContent( firstSource );
+            var shortcodeRisksByTag = GetShortcodeRisksByTag();
+            var summarySource = LavaApprovalBag.FromContentHash( firstSource.ContentHash, currentSources, false, shortcodeRisksByTag );
             
             return ActionOk( new LavaApprovalContentBag
             {
                 Content = content,
                 ContentHash = firstSource.ContentHash,
+                IsPublic = summarySource.IsPublic,
                 AIReviewDetails = firstSource.AIReviewDetails,
-                AIRiskAssessment = firstSource.AIRiskAssessment,
+                AIRiskAssessment = summarySource.AIRiskAssessment,
                 AIHasVulnerabilityConcerns = firstSource.AIHasVulnerabilityConcerns,
                 AIReviewDateTime = LavaApprovalBag.FromEntity( firstSource, currentSources.Count, false ).AIReviewDateTime,
-                Sources = currentSources.Select( s => LavaApprovalBag.FromEntity( s, currentSources.Count, false, GetEntityDetails( s ) ) ).ToList()
+                Sources = currentSources.Select( s => LavaApprovalBag.FromEntity( s, currentSources.Count, false, GetEntityDetails( s ), shortcodeRisksByTag ) ).ToList()
             } );
         }
 
@@ -181,14 +184,51 @@ namespace net.redeemertech.Security.Blocks.Blocks
             var sources = new LavaApprovalSourceService( RockContext ).Queryable()
                 .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null )
                 .ToList();
+            var shortcodeRisksByTag = GetShortcodeRisksByTag( sources );
 
             return sources
                 .Where( s => !approvalHashSet.Contains( s.ContentHash ) )
                 .GroupBy( s => s.ContentHash, StringComparer.OrdinalIgnoreCase )
-                .Select( g => LavaApprovalBag.FromContentHash( g.Key, g.ToList(), false ) )
+                .Select( g => LavaApprovalBag.FromContentHash( g.Key, g.ToList(), false, shortcodeRisksByTag ) )
                 .OrderByDescending( b => b.AIRiskSortOrder )
                 .ThenByDescending( g => g.MatchingSourceCount )
                 .ToList();
+        }
+
+        private Dictionary<string, string> GetShortcodeRisksByTag( List<LavaApprovalSource> sources = null )
+        {
+            sources = sources ?? new LavaApprovalSourceService( RockContext ).Queryable()
+                .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null )
+                .ToList();
+
+            var shortcodeSourcesByRowId = sources
+                .Where( s => s.TableName.Equals( "LavaShortcode", StringComparison.OrdinalIgnoreCase ) && s.ColumnName.Equals( "Markup", StringComparison.OrdinalIgnoreCase ) )
+                .GroupBy( s => s.RowId )
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending( s => s.AIReviewDateTime ).First() );
+
+            if ( !shortcodeSourcesByRowId.Any() )
+            {
+                return new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
+            }
+
+            var shortcodeRows = RockContext.Database.SqlQuery<LavaShortcodeContext>( @"
+                SELECT [Id], [TagName]
+                FROM [dbo].[LavaShortcode]" ).ToList();
+
+            var risksByTag = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
+            foreach ( var shortcode in shortcodeRows )
+            {
+                if ( shortcode.TagName.IsNullOrWhiteSpace() || !shortcodeSourcesByRowId.TryGetValue( shortcode.Id, out var source ) )
+                {
+                    continue;
+                }
+
+                risksByTag[shortcode.TagName] = LavaApprovalBag.GetDisplayRiskAssessment( source.AIRiskAssessment, source.IsPublic == true );
+            }
+
+            return risksByTag;
         }
 
         private List<LavaApprovalSource> GetCurrentSourcesByContentHash( string contentHash )
@@ -435,6 +475,13 @@ namespace net.redeemertech.Security.Blocks.Blocks
             public string ActivityTypeName { get; set; }
 
             public string ActionTypeName { get; set; }
+        }
+
+        private class LavaShortcodeContext
+        {
+            public int Id { get; set; }
+
+            public string TagName { get; set; }
         }
     }
 }

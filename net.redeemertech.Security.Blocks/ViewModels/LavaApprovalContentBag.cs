@@ -8,6 +8,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public string ContentHash { get; set; }
 
+        public bool? IsPublic { get; set; }
+
         public string AIReviewDetails { get; set; }
 
         public string AIRiskAssessment { get; set; }

@@ -3,6 +3,7 @@ import { LavaApprovalBag } from "./lavaApprovalBag";
 export type LavaApprovalContentBag = {
     content?: string | null;
     contentHash?: string | null;
+    isPublic?: boolean | null;
     aiReviewDetails?: string | null;
     aiRiskAssessment?: string | null;
     aiHasVulnerabilityConcerns?: boolean | null;

@@ -625,11 +625,14 @@ namespace net.redeemertech.Security
         private AuditCheckResult AuditUnapprovedLavaScripts( RockContext rockContext )
         {
             var timingDetails = new List<string>();
+            var shortcodeTags = GetLavaShortcodeTags( rockContext );
 
             foreach ( var target in GetLavaApprovalScanTargets() )
             {
-                ScanLavaApprovalTarget( rockContext, target, timingDetails );
+                ScanLavaApprovalTarget( rockContext, target, timingDetails, shortcodeTags );
             }
+
+            UpdatePublicLavaShortcodeSources( rockContext );
 
             var approvedContentHashes = new LavaApprovalService( rockContext ).Queryable()
                 .AsNoTracking()
@@ -692,7 +695,7 @@ namespace net.redeemertech.Security
             };
         }
 
-        private void ScanLavaApprovalTarget( RockContext rockContext, LavaApprovalScanTarget target, List<string> timingDetails )
+        private void ScanLavaApprovalTarget( RockContext rockContext, LavaApprovalScanTarget target, List<string> timingDetails, List<string> shortcodeTags )
         {
             var targetStopwatch = Stopwatch.StartNew();
             var afterRowId = 0;
@@ -726,7 +729,7 @@ namespace net.redeemertech.Security
 
                     var stageTable = CreateLavaApprovalSourceStageTable();
                     var changedRowsStopwatch = Stopwatch.StartNew();
-                    var windowMaxRowId = PopulateLavaApprovalSourceStageTable( connection, target, afterRowId, stageTable, batchTiming );
+                    var windowMaxRowId = PopulateLavaApprovalSourceStageTable( connection, target, afterRowId, stageTable, batchTiming, shortcodeTags );
                     changedRowsStopwatch.Stop();
                     batchTiming.ChangedRowsElapsed = changedRowsStopwatch.Elapsed;
 
@@ -790,6 +793,8 @@ namespace net.redeemertech.Security
             table.Columns.Add( "SourceChecksum", typeof( long ) );
             table.Columns.Add( "ContentHash", typeof( string ) );
             table.Columns.Add( "HasApprovalRequiredLava", typeof( bool ) );
+            table.Columns.Add( "IsPublic", typeof( bool ) );
+            table.Columns.Add( "ReferencedShortcodes", typeof( string ) );
             table.Columns.Add( "ContentPreview", typeof( string ) );
             table.Columns.Add( "ScannedDateTime", typeof( DateTime ) );
 
@@ -806,11 +811,13 @@ namespace net.redeemertech.Security
             }
         }
 
-        private int? PopulateLavaApprovalSourceStageTable( SqlConnection connection, LavaApprovalScanTarget target, int afterRowId, DataTable stageTable, LavaApprovalScanBatchTiming batchTiming )
+        private int? PopulateLavaApprovalSourceStageTable( SqlConnection connection, LavaApprovalScanTarget target, int afterRowId, DataTable stageTable, LavaApprovalScanBatchTiming batchTiming, List<string> shortcodeTags )
         {
             int? windowMaxRowId = null;
             var scannedDateTime = RockDateTime.Now;
+            var publicEvaluator = new LavaApprovalSourcePublicEvaluator();
 
+            using ( var publicRockContext = new RockContext() )
             using ( var command = connection.CreateCommand() )
             {
                 command.CommandText = target.GetChangedRowsSql( LavaApprovalScanBatchSize );
@@ -843,6 +850,13 @@ namespace net.redeemertech.Security
 
                         string contentHash = null;
                         string contentPreview = null;
+                        string referencedShortcodes = null;
+                        bool? isPublic = null;
+                        if ( hasApprovalRequiredLava )
+                        {
+                            isPublic = publicEvaluator.DetermineIsPublic( publicRockContext, target.TableName, rowId );
+                            referencedShortcodes = string.Join( "|", publicEvaluator.GetReferencedShortcodes( content, shortcodeTags ) );
+                        }
 
                         if ( hasApprovalRequiredLava )
                         {
@@ -866,6 +880,8 @@ namespace net.redeemertech.Security
                             sourceChecksum.HasValue ? ( object ) sourceChecksum.Value : DBNull.Value,
                             contentHash ?? ( object ) DBNull.Value,
                             hasApprovalRequiredLava,
+                            isPublic.HasValue ? ( object ) isPublic.Value : DBNull.Value,
+                            referencedShortcodes != null ? ( object ) referencedShortcodes : DBNull.Value,
                             contentPreview ?? ( object ) DBNull.Value,
                             scannedDateTime );
                     }
@@ -894,12 +910,64 @@ namespace net.redeemertech.Security
                         [SourceChecksum] [bigint] NULL,
                         [ContentHash] [nvarchar](64) NULL,
                         [HasApprovalRequiredLava] [bit] NOT NULL,
+                        [IsPublic] [bit] NULL,
+                        [ReferencedShortcodes] [nvarchar](max) NULL,
                         [ContentPreview] [nvarchar](max) NULL,
                         [ScannedDateTime] [datetime] NOT NULL,
                         PRIMARY KEY ([TableName], [ColumnName], [RowId])
                     );";
                 command.ExecuteNonQuery();
             }
+        }
+
+        private void UpdatePublicLavaShortcodeSources( RockContext rockContext )
+        {
+            var approvalSourceService = new LavaApprovalSourceService( rockContext );
+            var publicReferencedShortcodes = new HashSet<string>( approvalSourceService.Queryable()
+                .Where( s => s.HasApprovalRequiredLava && s.IsPublic == true && s.ReferencedShortcodes != null )
+                .Select( s => s.ReferencedShortcodes )
+                .ToList()
+                .SelectMany( s => s.Split( new[] { '|' }, StringSplitOptions.RemoveEmptyEntries ) ),
+                StringComparer.OrdinalIgnoreCase );
+
+            var shortcodeSources = approvalSourceService.Queryable()
+                .Where( s => s.HasApprovalRequiredLava && s.TableName == "LavaShortcode" && s.ColumnName == "Markup" )
+                .ToList();
+
+            if ( !shortcodeSources.Any() )
+            {
+                return;
+            }
+
+            var shortcodeRows = rockContext.Database.SqlQuery<LavaShortcodeScanContext>( @"
+                SELECT [Id], [TagName]
+                FROM [dbo].[LavaShortcode]" ).ToList();
+
+            foreach ( var shortcodeSource in shortcodeSources )
+            {
+                var tagName = shortcodeRows.FirstOrDefault( s => s.Id == shortcodeSource.RowId )?.TagName;
+                if ( tagName.IsNullOrWhiteSpace() )
+                {
+                    shortcodeSource.IsPublic = null;
+                    continue;
+                }
+
+                shortcodeSource.IsPublic = publicReferencedShortcodes.Contains( tagName )
+                    ? ( bool? ) true
+                    : null;
+            }
+
+            rockContext.SaveChanges();
+        }
+
+        private List<string> GetLavaShortcodeTags( RockContext rockContext )
+        {
+            return rockContext.Database.SqlQuery<string>( @"
+                SELECT [TagName]
+                FROM [dbo].[LavaShortcode]
+                WHERE [TagName] IS NOT NULL
+                    AND [TagName] <> N''" )
+                .ToList();
         }
 
         private void BulkCopyLavaApprovalSourceStageTable( SqlConnection connection, SqlTransaction transaction, DataTable stageTable, LavaApprovalScanBatchTiming batchTiming )
@@ -916,6 +984,8 @@ namespace net.redeemertech.Security
                 bulkCopy.ColumnMappings.Add( "SourceChecksum", "SourceChecksum" );
                 bulkCopy.ColumnMappings.Add( "ContentHash", "ContentHash" );
                 bulkCopy.ColumnMappings.Add( "HasApprovalRequiredLava", "HasApprovalRequiredLava" );
+                bulkCopy.ColumnMappings.Add( "IsPublic", "IsPublic" );
+                bulkCopy.ColumnMappings.Add( "ReferencedShortcodes", "ReferencedShortcodes" );
                 bulkCopy.ColumnMappings.Add( "ContentPreview", "ContentPreview" );
                 bulkCopy.ColumnMappings.Add( "ScannedDateTime", "ScannedDateTime" );
                 bulkCopy.WriteToServer( stageTable );
@@ -950,6 +1020,8 @@ namespace net.redeemertech.Security
                         target.[SourceChecksum] = stage.[SourceChecksum],
                         target.[ContentHash] = stage.[ContentHash],
                         target.[HasApprovalRequiredLava] = stage.[HasApprovalRequiredLava],
+                        target.[IsPublic] = stage.[IsPublic],
+                        target.[ReferencedShortcodes] = stage.[ReferencedShortcodes],
                         target.[ContentPreview] = stage.[ContentPreview],
                         target.[LastScannedDateTime] = stage.[ScannedDateTime],
                         target.[ModifiedDateTime] = stage.[ScannedDateTime],
@@ -973,6 +1045,8 @@ namespace net.redeemertech.Security
                         [SourceChecksum],
                         [ContentHash],
                         [HasApprovalRequiredLava],
+                        [IsPublic],
+                        [ReferencedShortcodes],
                         [ContentPreview],
                         [LastScannedDateTime],
                         [DetectedDateTime],
@@ -987,6 +1061,8 @@ namespace net.redeemertech.Security
                         stage.[SourceChecksum],
                         stage.[ContentHash],
                         stage.[HasApprovalRequiredLava],
+                        stage.[IsPublic],
+                        stage.[ReferencedShortcodes],
                         stage.[ContentPreview],
                         stage.[ScannedDateTime],
                         CASE WHEN stage.[HasApprovalRequiredLava] = 1 THEN stage.[ScannedDateTime] ELSE NULL END,
@@ -1957,6 +2033,13 @@ namespace net.redeemertech.Security
             public string Content { get; set; }
         }
 
+        private class LavaShortcodeScanContext
+        {
+            public int Id { get; set; }
+
+            public string TagName { get; set; }
+        }
+
         private class LavaApprovalScanBatchTiming
         {
             public int BatchNumber { get; set; }
@@ -2070,6 +2153,22 @@ namespace net.redeemertech.Security
                             WHERE s.[TableName] = N'{0}'
                                 AND s.[ColumnName] = N'{1}'
                                 AND s.[RowId] = t.[RowId]
+                                AND (
+                                    s.[SourceChecksum] = t.[SourceChecksum]
+                                    OR (s.[SourceChecksum] IS NULL AND t.[SourceChecksum] IS NULL)
+                                )
+                        )
+                    )
+                    OR (
+                        t.[Content] IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM [dbo].[_net_redeemertech_LavaApprovalSource] s
+                            WHERE s.[TableName] = N'{0}'
+                                AND s.[ColumnName] = N'{1}'
+                                AND s.[RowId] = t.[RowId]
+                                AND s.[HasApprovalRequiredLava] = 1
+                                AND s.[ReferencedShortcodes] IS NULL
                                 AND (
                                     s.[SourceChecksum] = t.[SourceChecksum]
                                     OR (s.[SourceChecksum] IS NULL AND t.[SourceChecksum] IS NULL)

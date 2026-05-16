@@ -34,6 +34,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public bool IsApproved { get; set; }
 
+        public bool? IsPublic { get; set; }
+
         public string AIReviewDateTime { get; set; }
 
         public string AIReviewProvider { get; set; }
@@ -48,15 +50,22 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public string AIReviewDetails { get; set; }
 
+        public string ShortcodeAIRiskAssessment { get; set; }
+
+        public int ShortcodeAIRiskSortOrder { get; set; }
+
         public List<LavaApprovalEntityDetailBag> EntityDetails { get; set; }
 
-        public static LavaApprovalBag FromContentHash( string contentHash, List<LavaApprovalSource> sources, bool isApproved )
+        public static LavaApprovalBag FromContentHash( string contentHash, List<LavaApprovalSource> sources, bool isApproved, Dictionary<string, string> shortcodeRisksByTag = null )
         {
             var firstSource = sources
                 .OrderByDescending( s => s.DetectedDateTime )
                 .ThenBy( s => s.TableName )
                 .ThenBy( s => s.RowId )
                 .First();
+            var isPublic = sources.Any( s => s.IsPublic == true );
+            var riskAssessment = GetDisplayRiskAssessment( firstSource.AIRiskAssessment, isPublic );
+            var shortcodeRiskAssessment = GetHighestShortcodeRiskAssessment( sources, shortcodeRisksByTag );
 
             return new LavaApprovalBag
             {
@@ -72,18 +81,24 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 MatchingSourceCount = sources.Count,
                 MatchingSourceSortValue = sources.Count.ToString( "D10" ),
                 IsApproved = isApproved,
+                IsPublic = isPublic,
                 AIReviewDateTime = FormatDateTime( firstSource.AIReviewDateTime ),
                 AIReviewProvider = firstSource.AIReviewProvider,
                 AIReviewModel = firstSource.AIReviewModel,
                 AIHasVulnerabilityConcerns = firstSource.AIHasVulnerabilityConcerns,
-                AIRiskAssessment = firstSource.AIRiskAssessment,
-                AIRiskSortOrder = GetRiskSortOrder( firstSource.AIRiskAssessment ),
-                AIReviewDetails = firstSource.AIReviewDetails
+                AIRiskAssessment = riskAssessment,
+                AIRiskSortOrder = GetRiskSortOrder( riskAssessment ),
+                AIReviewDetails = firstSource.AIReviewDetails,
+                ShortcodeAIRiskAssessment = shortcodeRiskAssessment,
+                ShortcodeAIRiskSortOrder = GetRiskSortOrder( shortcodeRiskAssessment )
             };
         }
 
-        public static LavaApprovalBag FromEntity( LavaApprovalSource source, int matchingSourceCount, bool isApproved, List<LavaApprovalEntityDetailBag> entityDetails = null )
+        public static LavaApprovalBag FromEntity( LavaApprovalSource source, int matchingSourceCount, bool isApproved, List<LavaApprovalEntityDetailBag> entityDetails = null, Dictionary<string, string> shortcodeRisksByTag = null )
         {
+            var riskAssessment = GetDisplayRiskAssessment( source.AIRiskAssessment, source.IsPublic == true );
+            var shortcodeRiskAssessment = GetHighestShortcodeRiskAssessment( new List<LavaApprovalSource> { source }, shortcodeRisksByTag );
+
             return new LavaApprovalBag
             {
                 IdKey = source.IdKey,
@@ -98,13 +113,16 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 MatchingSourceCount = matchingSourceCount,
                 MatchingSourceSortValue = matchingSourceCount.ToString( "D10" ),
                 IsApproved = isApproved,
+                IsPublic = source.IsPublic,
                 AIReviewDateTime = FormatDateTime( source.AIReviewDateTime ),
                 AIReviewProvider = source.AIReviewProvider,
                 AIReviewModel = source.AIReviewModel,
                 AIHasVulnerabilityConcerns = source.AIHasVulnerabilityConcerns,
-                AIRiskAssessment = source.AIRiskAssessment,
-                AIRiskSortOrder = GetRiskSortOrder( source.AIRiskAssessment ),
+                AIRiskAssessment = riskAssessment,
+                AIRiskSortOrder = GetRiskSortOrder( riskAssessment ),
                 AIReviewDetails = source.AIReviewDetails,
+                ShortcodeAIRiskAssessment = shortcodeRiskAssessment,
+                ShortcodeAIRiskSortOrder = GetRiskSortOrder( shortcodeRiskAssessment ),
                 EntityDetails = entityDetails ?? new List<LavaApprovalEntityDetailBag>()
             };
         }
@@ -113,6 +131,9 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         {
             switch ( riskAssessment?.Trim().ToLowerInvariant() )
             {
+                case "urgent":
+                    return 4;
+
                 case "high":
                     return 3;
 
@@ -130,6 +151,54 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         private static string FormatDateTime( DateTime? dateTime )
         {
             return dateTime.HasValue ? dateTime.Value.ToString( "g" ) : string.Empty;
+        }
+
+        public static string GetDisplayRiskAssessment( string riskAssessment, bool isPublic )
+        {
+            if ( !isPublic )
+            {
+                return riskAssessment;
+            }
+
+            switch ( riskAssessment?.Trim().ToLowerInvariant() )
+            {
+                case "high":
+                    return "urgent";
+
+                case "medium":
+                    return "high";
+
+                case "low":
+                    return "medium";
+
+                default:
+                    return riskAssessment;
+            }
+        }
+
+        private static string GetHighestShortcodeRiskAssessment( IEnumerable<LavaApprovalSource> sources, Dictionary<string, string> shortcodeRisksByTag )
+        {
+            if ( sources == null || shortcodeRisksByTag == null || !shortcodeRisksByTag.Any() )
+            {
+                return null;
+            }
+
+            return sources
+                .SelectMany( GetReferencedShortcodeTags )
+                .Select( tag => shortcodeRisksByTag.TryGetValue( tag, out var risk ) ? risk : null )
+                .Where( risk => risk.IsNotNullOrWhiteSpace() )
+                .OrderByDescending( GetRiskSortOrder )
+                .FirstOrDefault();
+        }
+
+        private static IEnumerable<string> GetReferencedShortcodeTags( LavaApprovalSource source )
+        {
+            if ( source?.ReferencedShortcodes.IsNullOrWhiteSpace() != false )
+            {
+                return Enumerable.Empty<string>();
+            }
+
+            return source.ReferencedShortcodes.Split( new[] { '|' }, StringSplitOptions.RemoveEmptyEntries );
         }
     }
 }

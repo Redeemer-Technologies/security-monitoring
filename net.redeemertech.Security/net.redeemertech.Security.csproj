@@ -102,6 +102,7 @@
     <Compile Include="DuckDbNativeLibrary.cs" />
     <Compile Include="IISLogDuckDbQuery.cs" />
     <Compile Include="LavaApprovalAiEvaluator.cs" />
+    <Compile Include="LavaApprovalSourcePublicEvaluator.cs" />
     <Compile Include="Jobs\ProcessIISLogs.cs" />
     <Compile Include="Jobs\SecurityAudit.cs" />
     <Compile Include="Migration\001_Pages.cs" />
@@ -110,6 +111,7 @@
     <Compile Include="Migration\004_IISAlertBlocking.cs" />
     <Compile Include="Migration\005_LavaApprovals.cs" />
     <Compile Include="Migration\006_LavaApprovalAiReview.cs" />
+    <Compile Include="Migration\007_LavaApprovalSourceIsPublic.cs" />
     <Compile Include="Model\IISAlert.cs" />
     <Compile Include="Model\IISAlertBlockedIp.cs" />
     <Compile Include="Model\IISAlertBlockedIpService.cs" />

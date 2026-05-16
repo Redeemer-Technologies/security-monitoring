@@ -24,7 +24,6 @@ using Rock.Model;
 using Rock.Security;
 using Rock.Utility.Enums;
 using Rock.Web.Cache;
-using Rock.Lava;
 
 namespace net.redeemertech.Security
 {
@@ -1180,7 +1179,32 @@ namespace net.redeemertech.Security
                 return false;
             }
 
-            return LavaHelper.ContainsLavaTags(content);
+            return ContainsLavaFormatting( content ) || ContainsLavaCommands( content );
+        }
+
+        private static bool ContainsLavaFormatting( string value )
+        {
+            return value.IndexOf( "{{", StringComparison.Ordinal ) >= 0;
+        }
+
+        private static bool ContainsLavaCommands( string value )
+        {
+            var length = value.Length - 1;
+
+            for ( int i = 0; i < length; i++ )
+            {
+                if ( value[i] == '{' )
+                {
+                    var next = value[i + 1];
+
+                    if ( next == '%' || next == '[' )
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private string ComputeContentHash( string content )

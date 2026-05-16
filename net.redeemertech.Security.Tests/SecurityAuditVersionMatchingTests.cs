@@ -82,6 +82,28 @@ namespace net.redeemertech.Security.Tests
             Assert.IsTrue( InvokePrivate<int>( "CompareVersions", "17.6.0-RC", "17.6.0-rc" ) == 0, "Expected fallback comparison to ignore case." );
         }
 
+        [DataTestMethod]
+        [DataRow( "{{ Person.NickName }}" )]
+        [DataRow( "{% assign firstName = Person.NickName %}" )]
+        [DataRow( "{[ shortcode property:'value' ]}" )]
+        public void ContainsApprovalRequiredLavaReturnsTrueForLavaDelimiters( string content )
+        {
+            Assert.IsTrue( InvokePrivate<bool>( "ContainsApprovalRequiredLava", content ) );
+        }
+
+        [DataTestMethod]
+        [DataRow( null )]
+        [DataRow( "" )]
+        [DataRow( "   " )]
+        [DataRow( "{\"name\":\"Alice\",\"roles\":[\"admin\",\"editor\"]}" )]
+        [DataRow( "{ \"query\": { \"term\": \"lava\" } }" )]
+        [DataRow( "{not lava}" )]
+        [DataRow( "JSON array [1, 2, 3] and object {\"value\": true}" )]
+        public void ContainsApprovalRequiredLavaReturnsFalseForNonLavaContent( string content )
+        {
+            Assert.IsFalse( InvokePrivate<bool>( "ContainsApprovalRequiredLava", content ) );
+        }
+
         /// <summary>
         /// Loads version data from a fixture file in the test project's Fixtures directory.
         /// </summary>

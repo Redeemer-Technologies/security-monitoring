@@ -281,7 +281,7 @@ namespace net.redeemertech.Security
                     Name = f.Name,
                     RequiresViewSecurity = f.RequiresViewSecurity,
                     AllowsPublicView = f.IsAuthorized( Authorization.VIEW, null ),
-                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( f, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized(f, Authorization.VIEW, new Person() { Guid = Guid.Empty, Id = 0 }),
                     FileCount = fileCountsByFileTypeId.ContainsKey( f.Id ) ? fileCountsByFileTypeId[f.Id] : 0
                 } )
                 .ToList();
@@ -347,7 +347,7 @@ namespace net.redeemertech.Security
                     Name = d.Name,
                     EntityType = d.EntityType != null ? d.EntityType.FriendlyName : string.Empty,
                     AllowsPublicView = d.IsAuthorized( Authorization.VIEW, null ),
-                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( d, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( d, Authorization.VIEW, new Person() { Guid = Guid.Empty, Id = 0 } ),
                     DocumentCount = documentCountsByDocumentTypeId.ContainsKey( d.Id ) ? documentCountsByDocumentTypeId[d.Id] : 0
                 } )
                 .ToList();
@@ -445,8 +445,8 @@ namespace net.redeemertech.Security
                     Id = w.Id,
                     Guid = w.Guid.ToString(),
                     Name = w.Name,
-                    AllowsAllUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllUsers ),
-                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers )
+                    AllowsAllUsersView = Authorization.Authorized( w, Authorization.VIEW, null ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized(w, Authorization.VIEW, new Person() { Guid = Guid.Empty, Id = 0 }),
                 } )
                 .ToList();
 
@@ -542,8 +542,8 @@ namespace net.redeemertech.Security
                     Id = w.Id,
                     Guid = w.Guid.ToString(),
                     Name = w.Name,
-                    AllowsAllUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllUsers ),
-                    AllowsAllAuthenticatedUsersView = Authorization.Authorized( w, Authorization.VIEW, SpecialRole.AllAuthenticatedUsers )
+                    AllowsAllUsersView = Authorization.Authorized( w, Authorization.VIEW, null ),
+                    AllowsAllAuthenticatedUsersView = Authorization.Authorized(w, Authorization.VIEW, new Person() { Guid = Guid.Empty, Id = 0 }),
                 } )
                 .ToList();
 

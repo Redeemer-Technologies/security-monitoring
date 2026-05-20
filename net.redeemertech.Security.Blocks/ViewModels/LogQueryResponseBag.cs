@@ -11,6 +11,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public GridDataBag GridData { get; set; }
 
+        public LavaTemplateResultsBag ChartLavaTemplateResults { get; set; }
+
         public LavaTemplateResultsBag LavaTemplateResults { get; set; }
 
         public Dictionary<string, string> NavigationUrls { get; set; }

@@ -49,8 +49,18 @@
 
             <div class="form-group">
                 <ButtonGroup v-model="resultsDisplayMode"
-                             :items="stdDisplayModeItems" />
+                              :items="stdDisplayModeItems" />
             </div>
+
+            <Switch v-model="showChart"
+                    text="Show Chart"
+                    help="Shows chart Lava output above the results table or template." />
+
+            <CodeEditor v-if="showChart"
+                        v-model="chartLavaTemplate"
+                        label="Chart Lava Template"
+                        help="The template has access to rows and tables. The default template assumes a date column and groups rows by date in Lava."
+                        mode="lava" />
 
             <template v-if="!isLavaTemplateDisplayMode">
                 <SectionHeader title="Grid Settings" />
@@ -120,6 +130,8 @@
     const gridTitle = ref("");
     const selectionUrl = ref("");
     const lavaTemplate = ref("");
+    const showChart = ref(false);
+    const chartLavaTemplate = ref("");
     const showQueryOnPage = ref(false);
 
     const displayModeItems = ref<ListItemBag[]>([]);
@@ -150,6 +162,8 @@
             gridTitle.value = result.data.settings.gridTitle ?? "";
             selectionUrl.value = result.data.settings.selectionUrl ?? "";
             lavaTemplate.value = result.data.settings.lavaTemplate ?? "";
+            showChart.value = result.data.settings.showChart;
+            chartLavaTemplate.value = result.data.settings.chartLavaTemplate ?? "";
             showQueryOnPage.value = result.data.settings.showQueryOnPage;
 
             securityGrant.updateToken(result.data.securityGrantToken);
@@ -173,6 +187,8 @@
         setCustomSettingsBoxValue(box, "gridTitle", gridTitle.value);
         setCustomSettingsBoxValue(box, "selectionUrl", selectionUrl.value);
         setCustomSettingsBoxValue(box, "lavaTemplate", lavaTemplate.value);
+        setCustomSettingsBoxValue(box, "showChart", showChart.value);
+        setCustomSettingsBoxValue(box, "chartLavaTemplate", chartLavaTemplate.value);
         setCustomSettingsBoxValue(box, "showQueryOnPage", showQueryOnPage.value);
 
         const result = await invokeBlockAction("SaveCustomSettings", { box });

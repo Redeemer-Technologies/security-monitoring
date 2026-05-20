@@ -20,6 +20,10 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public string LavaTemplate { get; set; }
 
+        public bool ShowChart { get; set; }
+
+        public string ChartLavaTemplate { get; set; }
+
         public bool ShowQueryOnPage { get; set; }
     }
 }

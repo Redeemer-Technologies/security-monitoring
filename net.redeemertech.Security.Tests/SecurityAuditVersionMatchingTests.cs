@@ -82,6 +82,45 @@ namespace net.redeemertech.Security.Tests
             Assert.IsTrue( InvokePrivate<int>( "CompareVersions", "17.6.0-RC", "17.6.0-rc" ) == 0, "Expected fallback comparison to ignore case." );
         }
 
+        [TestMethod]
+        public void GetKnownGoodLavaApprovalHashesIgnoresUnsupportedKnownGoodHashesSection()
+        {
+            var versionData = new Dictionary<string, object>
+            {
+                ["knownGoodHashes"] = new Dictionary<string, object>
+                {
+                    ["lavaApprovals"] = new object[]
+                    {
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+                        "not-a-sha256-hash",
+                        " "
+                    }
+                }
+            };
+
+            var hashes = InvokePrivate<HashSet<string>>( "GetKnownGoodLavaApprovalHashes", versionData );
+
+            Assert.AreEqual( 0, hashes.Count );
+        }
+
+        [TestMethod]
+        public void GetKnownGoodLavaApprovalHashesReadsTopLevelArray()
+        {
+            var versionData = new Dictionary<string, object>
+            {
+                ["knownGoodLavaApprovalHashes"] = new object[]
+                {
+                    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            };
+
+            var hashes = InvokePrivate<HashSet<string>>( "GetKnownGoodLavaApprovalHashes", versionData );
+
+            Assert.AreEqual( 1, hashes.Count );
+            Assert.IsTrue( hashes.Contains( "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" ) );
+        }
+
         [DataTestMethod]
         [DataRow( "{{ Person.NickName }}" )]
         [DataRow( "{% assign firstName = Person.NickName %}" )]

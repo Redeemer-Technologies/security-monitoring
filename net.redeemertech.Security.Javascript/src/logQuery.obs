@@ -26,9 +26,13 @@
         <LoadingIndicator v-if="isLoading" :delay="500" />
 
         <template v-else>
+            <div v-if="chartLavaTemplateResultsHtml"
+                 ref="chartLavaTemplateResultsElement"
+                 class="log-query-chart-results"></div>
+
             <div v-if="isLavaTemplateDisplayMode"
-                 ref="lavaTemplateResultsElement"
-                 class="log-query-lava-results"></div>
+                  ref="lavaTemplateResultsElement"
+                  class="log-query-lava-results"></div>
 
             <Grid v-else-if="gridDefinition"
                   :data="gridDataSource"
@@ -103,6 +107,8 @@
     const gridResults = ref<LogQueryResponseBag["gridResults"]>();
     const gridData = ref<GridDataBag>({});
     const navigationUrls = ref<Record<string, string> | null>();
+    const chartLavaTemplateResults = ref<LogQueryResponseBag["chartLavaTemplateResults"]>();
+    const chartLavaTemplateResultsElement = ref<HTMLElement | null>(null);
     const lavaTemplateResults = ref<LogQueryResponseBag["lavaTemplateResults"]>();
     const lavaTemplateResultsElement = ref<HTMLElement | null>(null);
     const enabledSlidingDateRangeUnits = [SlidingDateRangeType.Previous, SlidingDateRangeType.Last, SlidingDateRangeType.Current, SlidingDateRangeType.DateRange];
@@ -117,6 +123,7 @@
     const isGridTitleHidden = computed((): boolean => !gridTitle.value);
     
     const isLavaTemplateDisplayMode = computed(() => config.isLavaTemplateDisplayMode && !errorMessage.value);
+    const chartLavaTemplateResultsHtml = computed((): string | undefined | null => chartLavaTemplateResults.value?.resultsHtml);
     const lavaTemplateResultsHtml = computed((): string | undefined | null => lavaTemplateResults.value?.resultsHtml);
 
     const dynamicFields = computed((): (DynamicFieldDefinitionBag & { filter?: ColumnFilter, filterValue?: FilterValueFunction | string })[] => {
@@ -152,6 +159,7 @@
             gridResults.value = undefined;
             gridData.value = {};
             navigationUrls.value = null;
+            chartLavaTemplateResults.value = undefined;
             lavaTemplateResults.value = undefined;
             
             errorMessage.value = result.errorMessage || "Unknown error while trying to run the log query.";
@@ -160,6 +168,7 @@
         gridResults.value = result.data.gridResults;
         gridData.value = result.data.gridData ?? {};
         navigationUrls.value = result.data.navigationUrls ?? null;
+        chartLavaTemplateResults.value = result.data.chartLavaTemplateResults;
         lavaTemplateResults.value = result.data.lavaTemplateResults;
     }
 
@@ -203,6 +212,12 @@
     watch([lavaTemplateResultsElement, lavaTemplateResultsHtml], () => {
         if (lavaTemplateResultsElement.value && lavaTemplateResultsHtml.value) {
             setInnerHTML(lavaTemplateResultsElement.value, lavaTemplateResultsHtml.value);
+        }
+    });
+
+    watch([chartLavaTemplateResultsElement, chartLavaTemplateResultsHtml], () => {
+        if (chartLavaTemplateResultsElement.value && chartLavaTemplateResultsHtml.value) {
+            setInnerHTML(chartLavaTemplateResultsElement.value, chartLavaTemplateResultsHtml.value);
         }
     });
 

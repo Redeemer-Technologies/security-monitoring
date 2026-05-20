@@ -62,6 +62,11 @@ namespace net.redeemertech.Security
         false,
         key: AttributeKey.LavaApprovalOpenAIModel,
         order: 5 )]
+    [BooleanField( "Auto Approve Known Good Hashes",
+        "Automatically approve Lava approval hashes that match known-good hashes from the downloaded security plugin versions JSON file.",
+        true,
+        key: AttributeKey.AutoApproveKnownGoodHashes,
+        order: 6 )]
     [DisallowConcurrentExecution]
     public class SecurityAudit : RockJob
     {
@@ -93,21 +98,24 @@ namespace net.redeemertech.Security
             public const string LavaApprovalOpenAIApiKey = "LavaApprovalOpenAIApiKey";
 
             public const string LavaApprovalOpenAIModel = "LavaApprovalOpenAIModel";
+
+            public const string AutoApproveKnownGoodHashes = "AutoApproveKnownGoodHashes";
         }
 
         public override void Execute()
         {
             using ( var rockContext = new RockContext() )
             {
+                var securityPluginVersionData = GetSecurityPluginVersionData();
                 var checkResults = new List<AuditCheckResult>
                 {
-                    AuditSecurityPluginVersion(),
+                    AuditSecurityPluginVersion( securityPluginVersionData ),
                     AuditDisablePredictableIds(),
                     AuditAccountProtectionProfileSettings( rockContext ),
                     AuditPasswordRegularExpression(),
                     AuditSecurityRoleMemberships( rockContext ),
                     AuditSqlInjectionContent( rockContext ),
-                    AuditUnapprovedLavaScripts( rockContext ),
+                    AuditUnapprovedLavaScripts( rockContext, securityPluginVersionData ),
                     AuditBinaryFileTypeSecurity( rockContext ),
                     AuditDocumentTypeSecurity( rockContext ),
                     AuditWorkflowSecurity( rockContext ),
@@ -167,10 +175,9 @@ namespace net.redeemertech.Security
                     .Select( a => a.ContentHash )
                     .ToList();
 
-                var approvedContentHashSet = new HashSet<string>( approvedContentHashes, StringComparer.OrdinalIgnoreCase );
                 var reviewedContentHashes = new LavaApprovalSourceService( rockContext ).Queryable()
                     .AsNoTracking()
-                    .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && s.AIReviewDateTime.HasValue )
+                    .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && s.AIReviewDateTime.HasValue && !approvedContentHashes.Contains( s.ContentHash ) )
                     .Select( s => s.ContentHash )
                     .Distinct()
                     .ToList();
@@ -178,10 +185,10 @@ namespace net.redeemertech.Security
                 var reviewedContentHashSet = new HashSet<string>( reviewedContentHashes, StringComparer.OrdinalIgnoreCase );
                 var unreviewedContentHashes = new LavaApprovalSourceService( rockContext ).Queryable()
                     .AsNoTracking()
-                    .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null )
+                    .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && !approvedContentHashes.Contains( s.ContentHash ) )
                     .Select( s => s.ContentHash )
                     .ToList()
-                    .Where( h => !approvedContentHashSet.Contains( h ) && !reviewedContentHashSet.Contains( h ) )
+                    .Where( h => !reviewedContentHashSet.Contains( h ) )
                     .Distinct( StringComparer.OrdinalIgnoreCase )
                     .ToList();
 
@@ -642,7 +649,7 @@ namespace net.redeemertech.Security
             };
         }
 
-        private AuditCheckResult AuditUnapprovedLavaScripts( RockContext rockContext )
+        private AuditCheckResult AuditUnapprovedLavaScripts( RockContext rockContext, Dictionary<string, object> securityPluginVersionData )
         {
             var timingDetails = new List<string>();
             var shortcodeTags = GetLavaShortcodeTags( rockContext );
@@ -656,6 +663,10 @@ namespace net.redeemertech.Security
 
             RefreshLavaApprovalSourcePublicStatuses( rockContext );
             UpdatePublicLavaShortcodeSources( rockContext );
+            if ( GetAttributeValue( AttributeKey.AutoApproveKnownGoodHashes ).AsBoolean( true ) )
+            {
+                AutoApproveKnownGoodLavaApprovalHashes( rockContext, securityPluginVersionData );
+            }
 
             var approvedContentHashes = new LavaApprovalService( rockContext ).Queryable()
                 .AsNoTracking()
@@ -716,6 +727,177 @@ namespace net.redeemertech.Security
                 Details = details.ToString(),
                 LavaApprovalFindings = unapprovedSources
             };
+        }
+
+        private void AutoApproveKnownGoodLavaApprovalHashes( RockContext rockContext, Dictionary<string, object> securityPluginVersionData )
+        {
+            try
+            {
+                var knownGoodHashes = GetKnownGoodLavaApprovalHashes( securityPluginVersionData );
+                if ( !knownGoodHashes.Any() )
+                {
+                    return;
+                }
+
+                var approvalService = new LavaApprovalService( rockContext );
+                var existingApprovals = approvalService.Queryable()
+                    .AsNoTracking()
+                    .Select( a => a.ContentHash )
+                    .ToList();
+                var existingApprovalHashSet = new HashSet<string>( existingApprovals, StringComparer.OrdinalIgnoreCase );
+                var sources = new LavaApprovalSourceService( rockContext ).Queryable()
+                    .AsNoTracking()
+                    .Where( s => s.HasApprovalRequiredLava && s.ContentHash != null && !existingApprovals.Contains( s.ContentHash ) )
+                    .ToList()
+                    .Where( s => knownGoodHashes.Contains( s.ContentHash ) )
+                    .GroupBy( s => s.ContentHash, StringComparer.OrdinalIgnoreCase )
+                    .ToList();
+
+                var approvalCount = 0;
+                foreach ( var sourceGroup in sources )
+                {
+                    if ( existingApprovalHashSet.Contains( sourceGroup.Key ) )
+                    {
+                        continue;
+                    }
+
+                    var currentContent = GetCurrentLavaApprovalSourceContent( rockContext, sourceGroup, sourceGroup.Key );
+                    if ( currentContent == null )
+                    {
+                        continue;
+                    }
+
+                    approvalService.Add( new LavaApproval
+                    {
+                        ContentHash = sourceGroup.Key,
+                        ApprovedDateTime = RockDateTime.Now,
+                        ApprovedByPersonAliasId = null,
+                        ApprovalNote = "Automatically approved as a known-good Lava approval hash.",
+                        ApprovedContent = currentContent
+                    } );
+                    existingApprovalHashSet.Add( sourceGroup.Key );
+                    approvalCount++;
+                }
+
+                if ( approvalCount > 0 )
+                {
+                    rockContext.SaveChanges();
+                }
+            }
+            catch
+            {
+                // Known-good hash approval should not affect the audit email result.
+            }
+        }
+
+        private string GetCurrentLavaApprovalSourceContent( RockContext rockContext, IEnumerable<LavaApprovalSource> sources, string contentHash )
+        {
+            foreach ( var source in sources )
+            {
+                var content = GetCurrentLavaApprovalSourceContent( rockContext, source );
+                if ( string.Equals( ComputeContentHash( content ), contentHash, StringComparison.OrdinalIgnoreCase ) )
+                {
+                    return content;
+                }
+            }
+
+            return null;
+        }
+
+        private HashSet<string> GetKnownGoodLavaApprovalHashes( Dictionary<string, object> versionData )
+        {
+            var hashes = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
+            if ( versionData == null )
+            {
+                return hashes;
+            }
+
+            AddKnownGoodHashes( hashes, GetDictionaryValue( versionData, "knownGoodLavaApprovalHashes" ) );
+
+            return hashes;
+        }
+
+        private object GetDictionaryValue( Dictionary<string, object> dictionary, string key )
+        {
+            return dictionary
+                .Where( kvp => kvp.Key.Equals( key, StringComparison.OrdinalIgnoreCase ) )
+                .Select( kvp => kvp.Value )
+                .FirstOrDefault();
+        }
+
+        private void AddKnownGoodHashes( HashSet<string> hashes, object hashValue )
+        {
+            var hashList = hashValue as object[];
+            if ( hashList != null )
+            {
+                foreach ( var hash in hashList )
+                {
+                    AddKnownGoodHash( hashes, Convert.ToString( hash ) );
+                }
+
+                return;
+            }
+
+            AddKnownGoodHash( hashes, Convert.ToString( hashValue ) );
+        }
+
+        private void AddKnownGoodHash( HashSet<string> hashes, string hash )
+        {
+            if ( IsSha256Hash( hash ) )
+            {
+                hashes.Add( hash.Trim() );
+            }
+        }
+
+        private bool IsSha256Hash( string hash )
+        {
+            if ( hash.IsNullOrWhiteSpace() || hash.Trim().Length != 64 )
+            {
+                return false;
+            }
+
+            foreach ( var character in hash.Trim() )
+            {
+                if ( !( character >= '0' && character <= '9' )
+                    && !( character >= 'a' && character <= 'f' )
+                    && !( character >= 'A' && character <= 'F' ) )
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private string GetCurrentLavaApprovalSourceContent( RockContext rockContext, LavaApprovalSource source )
+        {
+            if ( source.TableName.Equals( LavaFileSourceTableName, StringComparison.OrdinalIgnoreCase ) && source.ColumnName.Equals( LavaFileSourceColumnName, StringComparison.OrdinalIgnoreCase ) )
+            {
+                if ( source.SourcePath.IsNullOrWhiteSpace() || !File.Exists( source.SourcePath ) )
+                {
+                    return null;
+                }
+
+                try
+                {
+                    return File.ReadAllText( source.SourcePath );
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            var target = GetLavaApprovalScanTargets()
+                .FirstOrDefault( t => t.TableName.Equals( source.TableName, StringComparison.OrdinalIgnoreCase ) && t.ColumnName.Equals( source.ColumnName, StringComparison.OrdinalIgnoreCase ) );
+            if ( target == null )
+            {
+                return null;
+            }
+
+            return rockContext.Database.SqlQuery<string>(
+                string.Format( "SELECT [{0}] FROM [dbo].[{1}] WHERE [Id] = @RowId", target.ColumnName, target.TableName ),
+                new SqlParameter( "@RowId", source.RowId ) ).FirstOrDefault();
         }
 
         private void ScanLavaApprovalTarget( RockContext rockContext, LavaApprovalScanTarget target, List<string> timingDetails, List<string> shortcodeTags )
@@ -1462,7 +1644,7 @@ namespace net.redeemertech.Security
             return preview.Length > 500 ? preview.Substring( 0, 500 ) + "..." : preview;
         }
 
-        private AuditCheckResult AuditSecurityPluginVersion()
+        private AuditCheckResult AuditSecurityPluginVersion( Dictionary<string, object> versionData )
         {
             var rockVersion = Rock.VersionInfo.VersionInfo.GetRockSemanticVersionNumber();
             var details = new StringBuilder();
@@ -1470,10 +1652,6 @@ namespace net.redeemertech.Security
 
             try
             {
-                var versionsJson = DownloadSecurityPluginVersionsJson( );
-                var serializer = new JavaScriptSerializer();
-                var versionData = serializer.DeserializeObject( versionsJson ) as Dictionary<string, object>;
-
                 if ( versionData == null )
                 {
                     return new AuditCheckResult
@@ -1526,6 +1704,20 @@ namespace net.redeemertech.Security
                     Details = "The security plugin versions could not be downloaded or there was an error parsing the file.",
                     SecurityNotices = notices
                 };
+            }
+        }
+
+        private Dictionary<string, object> GetSecurityPluginVersionData()
+        {
+            try
+            {
+                var versionsJson = DownloadSecurityPluginVersionsJson();
+                var serializer = new JavaScriptSerializer();
+                return serializer.DeserializeObject( versionsJson ) as Dictionary<string, object>;
+            }
+            catch
+            {
+                return null;
             }
         }
 

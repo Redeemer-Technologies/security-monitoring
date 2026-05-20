@@ -97,6 +97,18 @@ namespace net.redeemertech.Security.Blocks.Blocks
         Category = "CustomSetting",
         DefaultValue = DefaultLavaTemplate,
         IsRequired = false )]
+    [BooleanField( "Show Chart",
+        Key = AttributeKey.ShowChart,
+        Description = "Shows the chart Lava output above the results table or template.",
+        Category = "CustomSetting",
+        DefaultBooleanValue = false,
+        IsRequired = false )]
+    [TextField( "Chart Lava Template",
+        Key = AttributeKey.ChartLavaTemplate,
+        Description = "Formatting to apply to the returned results before the main results output. The template has access to rows and tables.",
+        Category = "CustomSetting",
+        DefaultValue = DefaultChartLavaTemplate,
+        IsRequired = false )]
     [BooleanField( "Show Query on Page",
         Key = AttributeKey.ShowQueryOnPage,
         Description = "Shows an editable SQL editor and Run button on the page. The most recently run query is saved to the user's block preferences.",
@@ -138,6 +150,115 @@ LIMIT 100";
     <div class=""alert alert-info"">No results found.</div>
 {% endif %}";
 
+        private const string DefaultChartLavaTemplate = @"{% assign firstRow = rows | First %}
+{% if firstRow %}
+    {% assign dateKeys = '' %}
+    {% for row in rows %}
+        {% assign rowDate = row['date'] | Date:'yyyy-MM-dd' %}
+        {% assign dateKey = '|' | Append:rowDate | Append:'|' %}
+        {% unless dateKeys contains dateKey %}
+            {% assign dateKeys = dateKeys | Append:dateKey %}
+        {% endunless %}
+    {% endfor %}
+    {% assign chartDates = dateKeys | Split:'|' %}
+
+    <div class=""card mb-3 log-query-chart"">
+        <div class=""card-body"">
+            <h3 class=""card-title"">Rows by Date</h3>
+            <canvas id=""logQueryRowsByDateChart-{{ BlockId }}"" style=""width: 100%; max-height: 400px;""></canvas>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            function renderChart() {
+                var canvas = document.getElementById('logQueryRowsByDateChart-{{ BlockId }}');
+                if (!canvas) return;
+
+                var existingChart = Chart.getChart ? Chart.getChart(canvas) : null;
+                if (existingChart) {
+                    existingChart.destroy();
+                }
+
+                var chartLabels = [
+                    {% for chartDate in chartDates %}
+                        {% if chartDate != '' %}
+                            ""{{ chartDate | Escape }}""{% unless forloop.last %},{% endunless %}
+                        {% endif %}
+                    {% endfor %}
+                ];
+
+                var rowCounts = [
+                    {% for chartDate in chartDates %}
+                        {% if chartDate != '' %}
+                            {% assign rowCount = 0 %}
+                            {% for row in rows %}
+                                {% assign rowDate = row['date'] | Date:'yyyy-MM-dd' %}
+                                {% if rowDate == chartDate %}
+                                    {% assign rowCount = rowCount | Plus:1 %}
+                                {% endif %}
+                            {% endfor %}
+                            {{ rowCount }}{% unless forloop.last %},{% endunless %}
+                        {% endif %}
+                    {% endfor %}
+                ];
+
+                new Chart(canvas.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: chartLabels,
+                        datasets: [
+                            {
+                                label: 'Rows',
+                                data: rowCounts,
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                                fill: true,
+                                tension: 0.3,
+                                pointBackgroundColor: 'rgba(75, 192, 192, 1)'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Date'
+                                }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Rows'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (typeof Chart !== 'undefined') {
+                renderChart();
+            } else {
+                var script = document.createElement('script');
+                script.src = '/Plugins/net_redeemertech/Security/chart.umd.min.js';
+                script.onload = function() {
+                    renderChart();
+                };
+                document.head.appendChild(script);
+            }
+        })();
+    </script>
+{% endif %}";
+
         private const string DefaultDateRange = IISLogDuckDbQuery.DefaultDateRange;
         private static readonly Regex SelectionUrlRegex = new Regex( @"\{[\w\s]+\}" );
 
@@ -156,6 +277,8 @@ LIMIT 100";
             public const string GridTitle = "GridTitle";
             public const string SelectionUrl = "SelectionUrl";
             public const string LavaTemplate = "LavaTemplate";
+            public const string ShowChart = "ShowChart";
+            public const string ChartLavaTemplate = "ChartLavaTemplate";
             public const string ShowQueryOnPage = "ShowQueryOnPage";
         }
 
@@ -244,6 +367,8 @@ LIMIT 100";
                 GridTitle = GetAttributeValue( AttributeKey.GridTitle ),
                 SelectionUrl = GetAttributeValue( AttributeKey.SelectionUrl ),
                 LavaTemplate = GetLavaTemplate(),
+                ShowChart = GetAttributeValue( AttributeKey.ShowChart ).AsBoolean(),
+                ChartLavaTemplate = GetChartLavaTemplate(),
                 ShowQueryOnPage = GetAttributeValue( AttributeKey.ShowQueryOnPage ).AsBoolean()
             };
 
@@ -279,6 +404,8 @@ LIMIT 100";
             box.IfValidProperty( nameof( box.Settings.GridTitle ), () => block.SetAttributeValue( AttributeKey.GridTitle, box.Settings.GridTitle ) );
             box.IfValidProperty( nameof( box.Settings.SelectionUrl ), () => block.SetAttributeValue( AttributeKey.SelectionUrl, box.Settings.SelectionUrl ) );
             box.IfValidProperty( nameof( box.Settings.LavaTemplate ), () => block.SetAttributeValue( AttributeKey.LavaTemplate, box.Settings.LavaTemplate ) );
+            box.IfValidProperty( nameof( box.Settings.ShowChart ), () => block.SetAttributeValue( AttributeKey.ShowChart, box.Settings.ShowChart.ToString() ) );
+            box.IfValidProperty( nameof( box.Settings.ChartLavaTemplate ), () => block.SetAttributeValue( AttributeKey.ChartLavaTemplate, box.Settings.ChartLavaTemplate ) );
             box.IfValidProperty( nameof( box.Settings.ShowQueryOnPage ), () => block.SetAttributeValue( AttributeKey.ShowQueryOnPage, box.Settings.ShowQueryOnPage.ToString() ) );
 
             block.SaveAttributeValues( this.RockContext );
@@ -304,9 +431,22 @@ LIMIT 100";
                 result.DataTable = dataTable;
                 result.ActualColumnConfigurations = LoadColumnConfigurationsFromDataTable( dataTable );
 
-                if ( IsLavaTemplateDisplayMode() )
+                var needsLavaMergeFields = IsLavaTemplateDisplayMode() || GetAttributeValue( AttributeKey.ShowChart ).AsBoolean();
+                if ( needsLavaMergeFields )
                 {
                     AddDataResultsToMergeFields( result );
+                }
+
+                if ( GetAttributeValue( AttributeKey.ShowChart ).AsBoolean() )
+                {
+                    result.ChartLavaTemplateResults = new LavaTemplateResultsBag
+                    {
+                        ResultsHtml = GetChartLavaTemplate().ResolveMergeFields( result.MergeFields, GetAttributeValue( AttributeKey.EnabledLavaCommands ) )
+                    };
+                }
+
+                if ( IsLavaTemplateDisplayMode() )
+                {
                     result.LavaTemplateResults = new LavaTemplateResultsBag
                     {
                         ResultsHtml = GetLavaTemplate().ResolveMergeFields( result.MergeFields, GetAttributeValue( AttributeKey.EnabledLavaCommands ) )
@@ -345,6 +485,7 @@ LIMIT 100";
             {
                 GridResults = result.GridResults,
                 GridData = result.GridData,
+                ChartLavaTemplateResults = result.ChartLavaTemplateResults,
                 LavaTemplateResults = result.LavaTemplateResults,
                 NavigationUrls = GetNavigationUrls( result )
             };
@@ -443,6 +584,7 @@ LIMIT 100";
         {
             var mergeFields = this.RequestContext.GetCommonMergeFields();
             mergeFields.AddOrReplace( "CurrentPage", this.PageCache );
+            mergeFields.AddOrReplace( "BlockId", this.BlockId );
 
             foreach ( var pageParam in this.RequestContext.GetPageParameters() )
             {
@@ -632,6 +774,11 @@ LIMIT 100";
             return GetAttributeValue( AttributeKey.LavaTemplate ).IfEmpty( DefaultLavaTemplate );
         }
 
+        private string GetChartLavaTemplate()
+        {
+            return GetAttributeValue( AttributeKey.ChartLavaTemplate ).IfEmpty( DefaultChartLavaTemplate );
+        }
+
         private string GetResultsDisplayMode()
         {
             var mode = GetAttributeValue( AttributeKey.ResultsDisplayMode );
@@ -659,6 +806,8 @@ LIMIT 100";
             public GridResultsBag GridResults { get; set; }
 
             public GridDataBag GridData { get; set; }
+
+            public LavaTemplateResultsBag ChartLavaTemplateResults { get; set; }
 
             public LavaTemplateResultsBag LavaTemplateResults { get; set; }
 

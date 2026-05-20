@@ -263,6 +263,18 @@ LIMIT 100", "554C77F0-D14D-45C2-AE7D-7A1D62AF5ADB");
             // Attribute for BlockType
             //   BlockType: Log Query
             //   Category: net_redeemertech > Security
+            //   Attribute: Show Chart
+            RockMigrationHelper.AddOrUpdateBlockTypeAttribute("46a5cc4c-673a-46e3-b100-98104dcc0539", "1EDAFDED-DFE6-4334-B019-6EECBA89E05A", "Show Chart", "ShowChart", "Show Chart", @"Shows the chart Lava output above the results table or template.", 0, @"False", "0899ba48-5dd1-4b33-b57b-01c3d66df78e");
+
+            // Attribute for BlockType
+            //   BlockType: Log Query
+            //   Category: net_redeemertech > Security
+            //   Attribute: Chart Lava Template
+            RockMigrationHelper.AddOrUpdateBlockTypeAttribute("46a5cc4c-673a-46e3-b100-98104dcc0539", "9C204CD0-1233-41C5-818A-C5DA439445AA", "Chart Lava Template", "ChartLavaTemplate", "Chart Lava Template", @"Formatting to apply to the returned results before the main results output. The template has access to rows and tables.", 0, @"", "e10ed1a8-951a-400f-ace5-bff70ec370e5");
+
+            // Attribute for BlockType
+            //   BlockType: Log Query
+            //   Category: net_redeemertech > Security
             //   Attribute: Show Query on Page
             RockMigrationHelper.AddOrUpdateBlockTypeAttribute("46a5cc4c-673a-46e3-b100-98104dcc0539", "1EDAFDED-DFE6-4334-B019-6EECBA89E05A", "Show Query on Page", "ShowQueryOnPage", "Show Query on Page", @"Shows an editable SQL editor and Run button on the page. The most recently run query is saved to the user's block preferences.", 0, @"False", "641EEE50-16B1-46B8-989C-2AD6BA9BAB93");
 

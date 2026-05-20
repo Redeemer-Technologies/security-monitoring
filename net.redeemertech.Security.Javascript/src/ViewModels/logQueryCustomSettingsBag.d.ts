@@ -9,5 +9,7 @@ export type LogQueryCustomSettingsBag = {
     gridTitle?: string | null;
     selectionUrl?: string | null;
     lavaTemplate?: string | null;
+    showChart: boolean;
+    chartLavaTemplate?: string | null;
     showQueryOnPage: boolean;
 };

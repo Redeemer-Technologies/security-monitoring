@@ -332,6 +332,23 @@ Treat direct script output, unsafe HTML rendering, unsanitized request/query/for
 
         private string GetCurrentSourceContent( RockContext rockContext, LavaApprovalSource source )
         {
+            if ( source.TableName.Equals( "FileSystem", StringComparison.OrdinalIgnoreCase ) && source.ColumnName.Equals( "LavaFile", StringComparison.OrdinalIgnoreCase ) )
+            {
+                if ( source.SourcePath.IsNullOrWhiteSpace() || !System.IO.File.Exists( source.SourcePath ) )
+                {
+                    return null;
+                }
+
+                try
+                {
+                    return System.IO.File.ReadAllText( source.SourcePath );
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
             var target = GetAllowedSourceTarget( source.TableName, source.ColumnName );
             if ( target == null )
             {

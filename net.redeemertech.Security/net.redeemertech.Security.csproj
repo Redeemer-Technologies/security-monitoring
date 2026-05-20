@@ -112,6 +112,7 @@
     <Compile Include="Migration\005_LavaApprovals.cs" />
     <Compile Include="Migration\006_LavaApprovalAiReview.cs" />
     <Compile Include="Migration\007_LavaApprovalSourceIsPublic.cs" />
+    <Compile Include="Migration\008_LavaApprovalSourcePath.cs" />
     <Compile Include="Model\IISAlert.cs" />
     <Compile Include="Model\IISAlertBlockedIp.cs" />
     <Compile Include="Model\IISAlertBlockedIpService.cs" />

@@ -69,6 +69,8 @@ namespace net.redeemertech.Security
         private const string SecurityRoleMembershipSnapshotSystemSettingKey = "net.redeemertech.SecurityAudit.SecurityRoleMembershipSnapshot";
         private const string SecurityRoleMembershipSnapshotSystemSettingGuid = "08e7a104-f535-4403-a73e-240cdf8daf49";
         private const int LavaApprovalScanBatchSize = 10000;
+        private const string LavaFileSourceTableName = "FileSystem";
+        private const string LavaFileSourceColumnName = "LavaFile";
 
         private static string SecurityPluginVersion
         {
@@ -650,6 +652,8 @@ namespace net.redeemertech.Security
                 ScanLavaApprovalTarget( rockContext, target, timingDetails, shortcodeTags );
             }
 
+            ScanLavaApprovalFiles( rockContext, timingDetails, shortcodeTags );
+
             RefreshLavaApprovalSourcePublicStatuses( rockContext );
             UpdatePublicLavaShortcodeSources( rockContext );
 
@@ -798,6 +802,202 @@ namespace net.redeemertech.Security
             timingDetails.Add( string.Format( "{0}.{1} total scan: {2} across {3} changed row(s) in {4} batch attempt(s).", target.TableName, target.ColumnName, FormatElapsed( targetStopwatch.Elapsed ), totalChangedRows, batchNumber ) );
         }
 
+        private void ScanLavaApprovalFiles( RockContext rockContext, List<string> timingDetails, List<string> shortcodeTags )
+        {
+            var scanStopwatch = Stopwatch.StartNew();
+            var scannedDateTime = RockDateTime.Now;
+            var publicEvaluator = new LavaApprovalSourcePublicEvaluator();
+            var approvalSourceService = new LavaApprovalSourceService( rockContext );
+            var existingFileSources = approvalSourceService.Queryable()
+                .Where( s => s.TableName == LavaFileSourceTableName && s.ColumnName == LavaFileSourceColumnName )
+                .ToList();
+            var existingByPath = existingFileSources
+                .Where( s => s.SourcePath.IsNotNullOrWhiteSpace() )
+                .GroupBy( s => NormalizeLavaFilePath( s.SourcePath ), StringComparer.OrdinalIgnoreCase )
+                .ToDictionary( g => g.Key, g => g.OrderBy( s => s.RowId ).First(), StringComparer.OrdinalIgnoreCase );
+            var occupiedRowIds = new HashSet<int>( existingFileSources.Select( s => s.RowId ) );
+            var currentPaths = EnumerateLavaFilePaths()
+                .Select( NormalizeLavaFilePath )
+                .Where( p => p.IsNotNullOrWhiteSpace() )
+                .Distinct( StringComparer.OrdinalIgnoreCase )
+                .OrderBy( p => p, StringComparer.OrdinalIgnoreCase )
+                .ToList();
+            var currentPathSet = new HashSet<string>( currentPaths, StringComparer.OrdinalIgnoreCase );
+            var processedCount = 0;
+            var lavaCount = 0;
+            var readFailureCount = 0;
+
+            foreach ( var staleSource in existingFileSources.Where( s => s.SourcePath.IsNullOrWhiteSpace() || !currentPathSet.Contains( NormalizeLavaFilePath( s.SourcePath ) ) ).ToList() )
+            {
+                approvalSourceService.Delete( staleSource );
+            }
+
+            foreach ( var filePath in currentPaths )
+            {
+                string content;
+                try
+                {
+                    content = File.ReadAllText( filePath );
+                }
+                catch
+                {
+                    readFailureCount++;
+                    continue;
+                }
+
+                processedCount++;
+
+                var hasApprovalRequiredLava = ContainsApprovalRequiredLava( content );
+                var source = existingByPath.ContainsKey( filePath )
+                    ? existingByPath[filePath]
+                    : new LavaApprovalSource
+                    {
+                        TableName = LavaFileSourceTableName,
+                        ColumnName = LavaFileSourceColumnName,
+                        RowId = GetLavaFileRowId( filePath, occupiedRowIds ),
+                        Guid = Guid.NewGuid(),
+                        CreatedDateTime = scannedDateTime
+                    };
+
+                if ( source.Id == 0 )
+                {
+                    approvalSourceService.Add( source );
+                    occupiedRowIds.Add( source.RowId );
+                }
+
+                source.SourcePath = filePath;
+                source.SourceChecksum = ComputeLavaFileChecksum( content );
+                source.HasApprovalRequiredLava = hasApprovalRequiredLava;
+                source.LastScannedDateTime = scannedDateTime;
+                source.ModifiedDateTime = scannedDateTime;
+                source.IsPublic = null;
+
+                if ( hasApprovalRequiredLava )
+                {
+                    lavaCount++;
+                    source.ContentHash = ComputeContentHash( content );
+                    source.ReferencedShortcodes = string.Join( "|", publicEvaluator.GetReferencedShortcodes( content, shortcodeTags ) );
+                    source.ContentPreview = BuildLavaContentPreview( content );
+                    if ( !source.DetectedDateTime.HasValue )
+                    {
+                        source.DetectedDateTime = scannedDateTime;
+                    }
+                }
+                else
+                {
+                    source.ContentHash = null;
+                    source.ReferencedShortcodes = null;
+                    source.ContentPreview = null;
+                    source.DetectedDateTime = null;
+                }
+            }
+
+            rockContext.SaveChanges();
+            scanStopwatch.Stop();
+            timingDetails.Add( string.Format( "{0}.{1} filesystem scan: {2} file(s), {3} approval-required, {4} read failure(s) in {5}.", LavaFileSourceTableName, LavaFileSourceColumnName, processedCount, lavaCount, readFailureCount, FormatElapsed( scanStopwatch.Elapsed ) ) );
+        }
+
+        private IEnumerable<string> EnumerateLavaFilePaths()
+        {
+            var rootPaths = new[]
+            {
+                HttpRuntime.AppDomainAppPath,
+                AppDomain.CurrentDomain.BaseDirectory
+            }
+                .Where( p => p.IsNotNullOrWhiteSpace() && Directory.Exists( p ) )
+                .Select( NormalizeLavaFilePath )
+                .Distinct( StringComparer.OrdinalIgnoreCase )
+                .ToList();
+
+            foreach ( var rootPath in rootPaths )
+            {
+                foreach ( var filePath in EnumerateLavaFilePaths( rootPath ) )
+                {
+                    yield return filePath;
+                }
+            }
+        }
+
+        private IEnumerable<string> EnumerateLavaFilePaths( string rootPath )
+        {
+            var directories = new Stack<string>();
+            directories.Push( rootPath );
+
+            while ( directories.Count > 0 )
+            {
+                var directory = directories.Pop();
+
+                string[] files;
+                try
+                {
+                    files = Directory.GetFiles( directory, "*.lava" );
+                }
+                catch
+                {
+                    files = new string[0];
+                }
+
+                foreach ( var file in files )
+                {
+                    yield return file;
+                }
+
+                string[] childDirectories;
+                try
+                {
+                    childDirectories = Directory.GetDirectories( directory );
+                }
+                catch
+                {
+                    childDirectories = new string[0];
+                }
+
+                foreach ( var childDirectory in childDirectories )
+                {
+                    directories.Push( childDirectory );
+                }
+            }
+        }
+
+        private string NormalizeLavaFilePath( string filePath )
+        {
+            if ( filePath.IsNullOrWhiteSpace() )
+            {
+                return string.Empty;
+            }
+
+            return Path.GetFullPath( filePath.Trim() );
+        }
+
+        private int GetLavaFileRowId( string filePath, HashSet<int> occupiedRowIds )
+        {
+            var rowId = ComputePositiveIntHash( filePath );
+            while ( occupiedRowIds.Contains( rowId ) )
+            {
+                rowId = rowId == int.MaxValue ? 1 : rowId + 1;
+            }
+
+            return rowId;
+        }
+
+        private int ComputePositiveIntHash( string value )
+        {
+            using ( var sha256 = SHA256.Create() )
+            {
+                var hashBytes = sha256.ComputeHash( Encoding.UTF8.GetBytes( value ?? string.Empty ) );
+                return BitConverter.ToInt32( hashBytes, 0 ) & int.MaxValue;
+            }
+        }
+
+        private long ComputeLavaFileChecksum( string content )
+        {
+            using ( var sha256 = SHA256.Create() )
+            {
+                var hashBytes = sha256.ComputeHash( Encoding.UTF8.GetBytes( content ?? string.Empty ) );
+                return BitConverter.ToInt64( hashBytes, 0 );
+            }
+        }
+
         private string FormatElapsed( TimeSpan elapsed )
         {
             return string.Format( "{0:N0} ms", elapsed.TotalMilliseconds );
@@ -814,6 +1014,7 @@ namespace net.redeemertech.Security
             table.Columns.Add( "HasApprovalRequiredLava", typeof( bool ) );
             table.Columns.Add( "ReferencedShortcodes", typeof( string ) );
             table.Columns.Add( "ContentPreview", typeof( string ) );
+            table.Columns.Add( "SourcePath", typeof( string ) );
             table.Columns.Add( "ScannedDateTime", typeof( DateTime ) );
 
             return table;
@@ -897,6 +1098,7 @@ namespace net.redeemertech.Security
                             hasApprovalRequiredLava,
                             referencedShortcodes != null ? ( object ) referencedShortcodes : DBNull.Value,
                             contentPreview ?? ( object ) DBNull.Value,
+                            DBNull.Value,
                             scannedDateTime );
                     }
 
@@ -926,6 +1128,7 @@ namespace net.redeemertech.Security
                         [HasApprovalRequiredLava] [bit] NOT NULL,
                         [ReferencedShortcodes] [nvarchar](max) NULL,
                         [ContentPreview] [nvarchar](max) NULL,
+                        [SourcePath] [nvarchar](max) NULL,
                         [ScannedDateTime] [datetime] NOT NULL,
                         PRIMARY KEY ([TableName], [ColumnName], [RowId])
                     );";
@@ -983,6 +1186,7 @@ namespace net.redeemertech.Security
             foreach ( var approvalSource in approvalSources )
             {
                 approvalSource.IsPublic = approvalSource.HasApprovalRequiredLava
+                    && !approvalSource.TableName.Equals( LavaFileSourceTableName, StringComparison.OrdinalIgnoreCase )
                     ? publicEvaluator.DetermineIsPublic( rockContext, approvalSource.TableName, approvalSource.RowId, publicWorkflowEntryWorkflowTypeIds )
                     : null;
             }
@@ -1016,6 +1220,7 @@ namespace net.redeemertech.Security
                 bulkCopy.ColumnMappings.Add( "HasApprovalRequiredLava", "HasApprovalRequiredLava" );
                 bulkCopy.ColumnMappings.Add( "ReferencedShortcodes", "ReferencedShortcodes" );
                 bulkCopy.ColumnMappings.Add( "ContentPreview", "ContentPreview" );
+                bulkCopy.ColumnMappings.Add( "SourcePath", "SourcePath" );
                 bulkCopy.ColumnMappings.Add( "ScannedDateTime", "ScannedDateTime" );
                 bulkCopy.WriteToServer( stageTable );
             }
@@ -1051,6 +1256,7 @@ namespace net.redeemertech.Security
                         target.[HasApprovalRequiredLava] = stage.[HasApprovalRequiredLava],
                         target.[ReferencedShortcodes] = stage.[ReferencedShortcodes],
                         target.[ContentPreview] = stage.[ContentPreview],
+                        target.[SourcePath] = stage.[SourcePath],
                         target.[LastScannedDateTime] = stage.[ScannedDateTime],
                         target.[ModifiedDateTime] = stage.[ScannedDateTime],
                         target.[DetectedDateTime] = CASE
@@ -1075,6 +1281,7 @@ namespace net.redeemertech.Security
                         [HasApprovalRequiredLava],
                         [ReferencedShortcodes],
                         [ContentPreview],
+                        [SourcePath],
                         [LastScannedDateTime],
                         [DetectedDateTime],
                         [CreatedDateTime],
@@ -1090,6 +1297,7 @@ namespace net.redeemertech.Security
                         stage.[HasApprovalRequiredLava],
                         stage.[ReferencedShortcodes],
                         stage.[ContentPreview],
+                        stage.[SourcePath],
                         stage.[ScannedDateTime],
                         CASE WHEN stage.[HasApprovalRequiredLava] = 1 THEN stage.[ScannedDateTime] ELSE NULL END,
                         stage.[ScannedDateTime],

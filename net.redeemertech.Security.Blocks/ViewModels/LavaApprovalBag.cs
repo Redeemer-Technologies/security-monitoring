@@ -105,7 +105,7 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 TableName = source.TableName,
                 ColumnName = source.ColumnName,
                 RowId = source.RowId,
-                Source = string.Format( "{0}.{1} #{2}", source.TableName, source.ColumnName, source.RowId ),
+                Source = source.SourcePath.IsNotNullOrWhiteSpace() ? source.SourcePath : string.Format( "{0}.{1} #{2}", source.TableName, source.ColumnName, source.RowId ),
                 ContentHash = source.ContentHash,
                 ContentPreview = source.ContentPreview,
                 DetectedDateTime = FormatDateTime( source.DetectedDateTime ),

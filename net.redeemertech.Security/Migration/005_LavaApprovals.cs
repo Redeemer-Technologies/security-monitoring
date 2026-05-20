@@ -43,6 +43,7 @@ namespace net.redeemertech.Security.Migrations
                         [ContentHash] [nvarchar](64) NULL,
                         [HasApprovalRequiredLava] [bit] NOT NULL CONSTRAINT [DF__net_redeemertech_LavaApprovalSource_HasApprovalRequiredLava] DEFAULT ((0)),
                         [ContentPreview] [nvarchar](max) NULL,
+                        [SourcePath] [nvarchar](max) NULL,
                         [LastScannedDateTime] [datetime] NOT NULL,
                         [DetectedDateTime] [datetime] NULL,
                         [CreatedDateTime] [datetime] NULL,

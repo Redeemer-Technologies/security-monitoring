@@ -48,6 +48,9 @@ namespace net.redeemertech.Security.Model
         public string ContentPreview { get; set; }
 
         [DataMember]
+        public string SourcePath { get; set; }
+
+        [DataMember]
         public DateTime LastScannedDateTime { get; set; }
 
         [DataMember]

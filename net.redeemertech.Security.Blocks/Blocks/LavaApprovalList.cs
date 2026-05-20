@@ -280,12 +280,61 @@ namespace net.redeemertech.Security.Blocks.Blocks
 
         private List<LavaApprovalEntityDetailBag> GetEntityDetails( LavaApprovalSource source )
         {
+            if ( source.TableName.Equals( "LavaShortcode", StringComparison.OrdinalIgnoreCase ) )
+            {
+                return GetLavaShortcodeEntityDetails( source.RowId );
+            }
+
+            if ( source.TableName.Equals( "HtmlContent", StringComparison.OrdinalIgnoreCase ) )
+            {
+                return GetHtmlContentEntityDetails( source.RowId );
+            }
+
             if ( !source.TableName.Equals( "AttributeValue", StringComparison.OrdinalIgnoreCase ) )
             {
                 return new List<LavaApprovalEntityDetailBag>();
             }
 
             return GetAttributeValueEntityDetails( source.RowId );
+        }
+
+        private List<LavaApprovalEntityDetailBag> GetLavaShortcodeEntityDetails( int lavaShortcodeId )
+        {
+            var shortcode = RockContext.Database.SqlQuery<LavaShortcodeContext>( @"
+                SELECT [Id], [Name], [TagName]
+                FROM [dbo].[LavaShortcode]
+                WHERE [Id] = @LavaShortcodeId",
+                new SqlParameter( "@LavaShortcodeId", lavaShortcodeId ) ).FirstOrDefault();
+
+            var details = new List<LavaApprovalEntityDetailBag>();
+            AddDetail( details, "Lava Shortcode", shortcode?.Name ?? shortcode?.TagName );
+
+            return details;
+        }
+
+        private List<LavaApprovalEntityDetailBag> GetHtmlContentEntityDetails( int htmlContentId )
+        {
+            var blocks = RockContext.Database.SqlQuery<BlockTypePageEntityDetail>( @"
+                SELECT
+                    DISTINCT [p].[Id] AS [PageId],
+                    [p].[InternalName] AS [PageName],
+                    [bt].[Name] [BlockTypeName]
+                FROM [dbo].[HtmlContent] [hc]
+                INNER JOIN [dbo].[Block] [b] ON [b].[Id] = [hc].[BlockId]
+                INNER JOIN [dbo].[Page] [p] ON [p].[Id] = [b].[PageId]
+                INNER JOIN [dbo].[BlockType] [bt] ON [bt].[Id] = [b].[BlockTypeId]
+                WHERE [hc].[Id] = @HtmlContentId
+                ORDER BY [p].[InternalName]",
+                new SqlParameter( "@HtmlContentId", htmlContentId ) ).ToList();
+
+            var details = new List<LavaApprovalEntityDetailBag>();
+            foreach ( var block in blocks )
+            {
+                AddDetail( details, "Page", block.PageName, $"/page/{block.PageId}" );
+                AddDetail( details, "Block Type", block.BlockTypeName );
+            }
+
+            return details;
         }
 
         private List<LavaApprovalEntityDetailBag> GetAttributeValueEntityDetails( int attributeValueId )
@@ -497,6 +546,8 @@ namespace net.redeemertech.Security.Blocks.Blocks
         private class LavaShortcodeContext
         {
             public int Id { get; set; }
+
+            public string Name { get; set; }
 
             public string TagName { get; set; }
         }

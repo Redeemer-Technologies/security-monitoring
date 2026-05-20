@@ -199,7 +199,7 @@
 </template>
 
 <script setup lang="ts">
-    import { computed, ref } from "vue";
+    import { computed, onMounted, ref, watch } from "vue";
     import Grid, { Column, SelectColumn, TextColumn, textValueFilter, numberValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
     import { GridAction, IGridState } from "@Obsidian/Types/Controls/grid";
     import Modal from "@Obsidian/Controls/modal.obs";
@@ -274,6 +274,36 @@
         return actions;
     });
 
+    onMounted(() => {
+        const hash = getUrlHashParameter();
+        if (hash) {
+            openApproval(hash);
+        }
+    });
+
+    watch(isModalOpen, isOpen => {
+        if (!isOpen) {
+            setUrlHashParameter(null);
+        }
+    });
+
+    function getUrlHashParameter(): string {
+        return new URL(window.location.href).searchParams.get("hash") ?? "";
+    }
+
+    function setUrlHashParameter(hash: string | null): void {
+        const url = new URL(window.location.href);
+
+        if (hash) {
+            url.searchParams.set("hash", hash);
+        }
+        else {
+            url.searchParams.delete("hash");
+        }
+
+        window.history.replaceState(window.history.state, "", url);
+    }
+
     async function openApproval(idKey: string | null | undefined): Promise<void> {
         const source = sources.value.find(s => s.idKey === idKey) ?? null;
         if (!idKey || !source) {
@@ -290,6 +320,7 @@
         selectedAIReviewDateTime.value = source.aiReviewDateTime ?? "";
         modalErrorMessage.value = "";
         isModalOpen.value = true;
+        setUrlHashParameter(source.contentHash ?? idKey);
 
         const result = await invokeBlockAction("GetSourceContent", { contentHash: source.contentHash });
         if (result.isSuccess && result.data) {

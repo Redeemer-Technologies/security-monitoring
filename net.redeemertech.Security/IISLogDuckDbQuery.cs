@@ -30,15 +30,15 @@ namespace net.redeemertech.Security
         public DataTable Execute( string query, string dateRange, string parquetFolder, int maximumParquetFiles, int timeoutSeconds, bool loadRows, Dictionary<string, object> sqlParameters )
         {
             var preparedQuery = PrepareQueryParts( query, dateRange, parquetFolder, maximumParquetFiles );
-            return ExecutePreparedQuery( preparedQuery.Query, timeoutSeconds, loadRows, sqlParameters, preparedQuery.RawLogsSql );
+            return ExecutePreparedQuery( preparedQuery.Query, timeoutSeconds, loadRows, sqlParameters, preparedQuery.RawLogsSql, preparedQuery.RequiresParsingPersonTokens );
         }
 
-        public DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows = true, Dictionary<string, object> sqlParameters = null )
+        public DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows = true, Dictionary<string, object> sqlParameters = null, bool requiresImpersonationTokens = false)
         {
-            return ExecutePreparedQuery( preparedQuery, timeoutSeconds, loadRows, sqlParameters, null );
+            return ExecutePreparedQuery( preparedQuery, timeoutSeconds, loadRows, sqlParameters, null, requiresImpersonationTokens );
         }
 
-        private DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows, Dictionary<string, object> sqlParameters, string rawLogsSql )
+        private DataTable ExecutePreparedQuery( string preparedQuery, int timeoutSeconds, bool loadRows, Dictionary<string, object> sqlParameters, string rawLogsSql, bool requiresImpersonationTokens )
         {
             DuckDbNativeLibrary.EnsureLoaded();
 
@@ -48,7 +48,7 @@ namespace net.redeemertech.Security
             {
                 connection.Open();
                 CreateImpersonationTokenTable( connection );
-                if ( loadRows )
+                if ( loadRows && requiresImpersonationTokens )
                 {
                     PopulateImpersonationTokenTable( connection, rawLogsSql );
                 }
@@ -97,13 +97,16 @@ namespace net.redeemertech.Security
                 throw new InvalidOperationException( "No parquet files were found in the configured parquet folder for the selected date range." );
             }
 
+            var requiresPersonTokens = query.Contains("impersonated_person_id");
+
             var fileList = "[" + parquetFiles.Select( f => "'" + EscapeSqlString( f ) + "'" ).JoinStrings( "," ) + "]";
             var rawLogsSql = GetRawLogsSql( fileList );
             var logsFromSql = "( SELECT __logs.*, __tokens.impersonated_person_id FROM " + rawLogsSql + " __logs LEFT JOIN " + ImpersonationTokenTableName + " __tokens ON __logs.\"cs-username\" = __tokens.cs_username )";
             return new PreparedQuery
             {
                 Query = query.Replace( LogsPlaceholder, logsFromSql ),
-                RawLogsSql = rawLogsSql
+                RawLogsSql = rawLogsSql,
+                RequiresParsingPersonTokens = requiresPersonTokens
             };
         }
 
@@ -451,6 +454,8 @@ namespace net.redeemertech.Security
             public string Query { get; set; }
 
             public string RawLogsSql { get; set; }
+
+            public bool RequiresParsingPersonTokens { get; set; }
         }
     }
 }

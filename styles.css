@@ -595,6 +595,7 @@ kbd {
   font-weight: 500;
   text-decoration: none;
   transition: background 0.15s, border-color 0.15s;
+  justify-content: center;
 }
 
 .release-download:hover,
@@ -770,4 +771,9 @@ h4:hover .anchor {
 /* When the menu is open on mobile, prevent body scroll */
 body.menu-open {
   overflow: hidden;
+}
+
+
+h1 {
+  margin-top: 4rem;
 }

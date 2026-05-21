@@ -113,7 +113,7 @@
 
         <main class="content">
             <header>
-                <h1>Security Plugin for Rock</h1>
+                <h1 style="margin-top: 0;">Security Plugin for Rock</h1>
                 <!-- <p class="lede">Improve your security posture by being notified about known configuration loopholes and monitor your IIS Logs. </p> -->
             </header>
 
@@ -121,7 +121,7 @@
                 <h2>Overview <a class="anchor" href="#overview">#</a></h2>
                 <p> This plugin provides a set of tools to help Rock administrators monitor and improve the security of their Rock instances.
                     It provides a daily email summary of potential security issues with your Rock configuration and a set of tools to analyze your IIS logs from within Rock.
-                    The Lava Approvals tool can scan your system for unsafe Lava and SQL and, with the help of AI, help you understand how to write better scripts.
+                    The Lava Approvals tool can scan your system for unsafe Lava and SQL and, with the help of AI, help you understand how to harden your Lava.
                 </p>
                 
                 <p>Installing this plugin will add the following components to your Rock instance:</p>
@@ -350,7 +350,30 @@ LIMIT 100</code></pre>
                     
                 </dl>
             </section>
+        
 
+            <h1 id="lava-approvals">Lava Approvals</h1>
+            <section>
+                <h2 id="lava-approvals-overview">Overview</h2>
+                <p>Lava Approvals is a tool to help you stay on top of the Lava and SQL scripts
+                    that are being deployed at various places around your Rock instance. The Security Audit job will scan common places that Lava and SQL are found,
+                    such as in HTML blocks, Dynamic Data blocks, Lava and SQL runs in workflows, Lava shortcodes, and more. When it finds content
+                    that contains Lava tags, it will create an entry on the <code>Installed Plugins -> Rock Security -> Lava Approvals</code> page in Rock.</p>
+
+                <p>From the Lava Approvals page, you can review the content of each script and and approve it if it meets your security standards. 
+                    Approval is only required once for each unique Lava script, as determined by the SHA-256 hash of the script content. If a previously approved script
+                    changes in any way, it will reappear on the Lava Approvals page for review and approval.</p>
+
+                <p>You may optionally specify an OpenAI API key and model on the Security Audit job and the Lava Approvals List block. If provided,
+                    The security audit job will scan each discovered Lava script for vulnerabilities with the configured AI model and provide an AI analysis
+                    along with each Lava Approval. The AI analysis is meant to help you understand the potential security implications of the script and
+                    give you guidance on how to improve it. The AI will include a risk rating of low, medium, or high along with an explanation of the
+                    reasoning behind the rating and suggestions for improving the script's security.
+                </p>
+
+                <p>Where possible, the plugin will attempt to determine if a vulnerable Lava script is accessible to in some way and mark that script with a <code>public</code>
+                tag on the approvals screen. Any scripts marked as public will have their risk rating escalated.</p>
+            </section>
 
             <footer class="site-footer">
             </footer>

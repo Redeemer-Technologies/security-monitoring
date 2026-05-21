@@ -1,4 +1,4 @@
 #### Overview
-This plugin is designed to help improve your Rock security posture by allowing you to monitor your IIS Logs from within Rock and providing you with notifications about security configuration problems with your Rock instance. The plugin consists of two Rock service jobs and one block. Each component is independent and can be enabled, scheduled, or omitted as needed.
+This plugin provides a set of tools to help Rock administrators monitor and maintain the security of their Rock instances. It provides a daily email summary of potential security issues with your Rock configuration and a set of tools to analyze your IIS logs from within Rock. The Lava Approvals tool can use AI to scan for Lava and SQL vulnerabilities across common areas like blocks, workflows, and shortcodes.
 
 Additional documentation can be found at https://security.redeemertech.com

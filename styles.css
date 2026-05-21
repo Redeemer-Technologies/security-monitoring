@@ -224,7 +224,7 @@ a:focus {
   html:not([data-theme="light"]) .theme-toggle .icon-sun { display: block; }
   html:not([data-theme="light"]) .theme-toggle .icon-moon { display: none; }
   html:not([data-theme="light"]) .logo-dark { display: none; }
-  html:not([data-theme="light"]) .logo-light { display: block; }
+  html:not([data-theme="light"]) .logo-light { display: flex; }
 }
 
 html[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
@@ -232,7 +232,7 @@ html[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 html[data-theme="light"] .theme-toggle .icon-sun { display: none; }
 html[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 html:not([data-theme="dark"]) .logo-light { display: none; }
-html:not([data-theme="dark"]) .logo-dark { display: block; }
+html:not([data-theme="dark"]) .logo-dark { display: flex; }
 
 /* Hamburger button (mobile only) */
 .menu-toggle {
@@ -583,6 +583,7 @@ kbd {
 .release-download {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
   margin-top: auto;
   padding: 0.45rem 0.9rem;

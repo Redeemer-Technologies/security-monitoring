@@ -36,9 +36,9 @@
                 </svg>
             </button>
             <a class="brand logo-light" href="https://redeemertech.com"><img src="/logo-light.svg" alt="Redeemer Tech"
-                    style="width: 100px;"> <span class="brand-tag">Docs</span></a>
+                    style="width: 150px;"> <span class="brand-tag">Docs</span></a>
             <a class="brand logo-dark" href="https://redeemertech.com"><img src="/logo-dark.svg" alt="Redeemer Tech"
-                    style="width: 100px;"> <span class="brand-tag">Docs</span></a>
+                    style="width: 150px;"> <span class="brand-tag">Docs</span></a>
         </div>
         <div class="topbar-right">
             <button class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle color theme">
@@ -68,8 +68,8 @@
         <aside id="sidebar" class="sidebar" aria-label="Section navigation">
             <h4>Getting started</h4>
             <ul>
-                <li><a href="#releases">Releases</a></li>
                 <li><a href="#overview">Overview</a></li>
+                <li><a href="#releases">Releases</a></li>
                 <li><a href="#installation">Installation</a></li>
             </ul>
 
@@ -98,6 +98,12 @@
                 <li><a href="#audit-settings">Job settings</a></li>
             </ul>
 
+            <h4>Lava Approvals</h4>
+            <ul>
+                <li><a href="#lava-approvals-overview">Overview</a></li>
+                <li><a href="lava-approvals.html">Known approved Lava hashes</a></li>
+            </ul>
+
 
             <!-- <h4>Reference</h4>
             <ul>
@@ -111,32 +117,14 @@
                 <!-- <p class="lede">Improve your security posture by being notified about known configuration loopholes and monitor your IIS Logs. </p> -->
             </header>
 
-            <section id="releases">
-                <h2>Releases <a class="anchor" href="#releases">#</a></h2>
-                <div class="release-grid">
-                    <div class="release-card">
-                        <div class="release-card-header">
-                            <span class="release-rock-version">Rock 17</span>
-                        </div>
-                        <dl class="release-meta">
-                            <dt>Plugin version</dt>
-                            <dd><code>17.0.0.1</code></dd>
-                            <dt>Release date</dt>
-                            <dd>May 11, 2026</dd>
-                        </dl>
-                        <a class="release-download" href="/net.redeemertech.Security_17.0.0.1.zip">
-                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L4.78 5.97a.75.75 0 0 0-1.06 1.06l3.75 3.75Z"/><path d="M3.75 13a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z"/></svg>
-                            Download for Rock 17
-                        </a>
-                    </div>
-                </div>
-            </section>
-
             <section id="overview">
                 <h2>Overview <a class="anchor" href="#overview">#</a></h2>
-                <p> This plugin is designed to help improve your Rock security posture. It allows you to monitor your IIS Logs from within Rock and providing you with notifications about security configuration problems with your Rock instance. The plugin consists of two Rock service jobs and one block. Each component is independent and can be
-                    enabled, scheduled, or omitted as needed.</p>
-
+                <p> This plugin provides a set of tools to help Rock administrators monitor and improve the security of their Rock instances.
+                    It provides a daily email summary of potential security issues with your Rock configuration and a set of tools to analyze your IIS logs from within Rock.
+                    The Lava Approvals tool can scan your system for unsafe Lava and SQL and, with the help of AI, help you understand how to write better scripts.
+                </p>
+                
+                <p>Installing this plugin will add the following components to your Rock instance:</p>
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -150,7 +138,7 @@
                             <tr>
                                 <td><code>Security Audit Job</code></td>
                                 <td>Rock Job</td>
-                                <td>Runs a suite of pass/fail checks against Rock security settings and known configuration issues.</td>
+                                <td>Runs a suite of pass/fail checks against Rock security settings and known configuration issues and finds Lava scripts needing approval</td>
                             </tr>
                             <tr>
                                 <td><code>Process IIS Logs Job</code></td>
@@ -159,13 +147,38 @@
                                     <code>App_Data</code> for performant querying.</td>
                             </tr>
                             <tr>
-                                <td><code>IIS Log Query Block</code></td>
-                                <td>Rock Block</td>
-                                <td>Executes DuckDB SQL queries against the your processed IIS logs.
-                                </td>
+                                <td><code>Installed Plugins -> Rock Security</code></td>
+                                <td>Page</td>
+                                <td>A set of pre-built pages for IIS monitoring and Lava Approvals</td>
+                            </tr>
+                            <tr>
+                                <td><code>Power Tools -> IIS Log Query</code></td>
+                                <td>Page</td>
+                                <td>A block that allows you to write SQL queries against your IIS logs.</td>
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </section>
+            
+            <section id="releases">
+                <h2>Releases <a class="anchor" href="#releases">#</a></h2>
+                <div class="release-grid">
+                    <div class="release-card">
+                        <div class="release-card-header">
+                            <span class="release-rock-version">Rock 17</span>
+                        </div>
+                        <dl class="release-meta">
+                            <dt>Plugin version</dt>
+                            <dd><code>17.0.0.4</code></dd>
+                            <dt>Release date</dt>
+                            <dd>May 20, 2026</dd>
+                        </dl>
+                        <a class="release-download" href="/net.redeemertech.Security_17.0.0.1.zip">
+                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L4.78 5.97a.75.75 0 0 0-1.06 1.06l3.75 3.75Z"/><path d="M3.75 13a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z"/></svg>
+                            Download
+                        </a>
+                    </div>
                 </div>
             </section>
 
@@ -189,7 +202,7 @@
 
             <section id="iis-logs-overview">
                 <h2>Overview <a class="anchor" href="#iis-logs-overview">#</a></h2>
-                <p>Analyzing your IIS logs can be an important part of monitoring for and investigating potential security incidents. This plugin provides a built-in mechanism for processing your IIS logs into a format optimized for querying from within Rock. By default, the plugin looks for IIS W3C log files in the standard log directory, but you can configure a custom path if needed.</p>
+                <p>Analyzing your IIS logs can be an important part of monitoring for and investigating potential security incidents. This plugin provides a job that processes your IIS logs into a format optimized for querying from within Rock. By default, the plugin looks for IIS W3C log files in the standard log directory, but you can configure a custom path if needed.</p>
 
                 <p>The plugin creates a set of pages under Installed Plugins -> IIS Analytics that are pre-configured with a set of reports. These pages can be customized or extended with additional IIS Log Query blocks as needed.</p>
 

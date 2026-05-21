@@ -77,23 +77,13 @@
             <ul>
                 <li><a href="#iis-process-job">Process IIS Logs job</a></li>
                 <li><a href="#iis-query-block">IIS Log Query block</a></li>
-                <li><a href="#iis-query-syntax">Query syntax</a></li>
-                <li><a href="#iis-parameters">Block attributes</a></li>
+                <li><a href="#iis-analytics-page">IIS Analytics Page</a></li>
             </ul>
 
             <h4>Security Audit Job</h4>
             <ul>
                 <li><a href="#security-audit">Job summary</a></li>
                 <li><a href="#audit-checks">Checks</a>
-                    <ul>
-                        <li><a href="#check-plugin-version">Plugin version</a></li>
-                        <li><a href="#check-predictable-ids">Predictable Ids</a></li>
-                        <li><a href="#check-password-regex">Password regex</a></li>
-                        <li><a href="#check-role-membership">Role membership</a></li>
-                        <li><a href="#check-injection">Injection content</a></li>
-                        <li><a href="#check-binary-files">Binary file types</a></li>
-                        <li><a href="#check-document-types">Document types</a></li>
-                    </ul>
                 </li>
                 <li><a href="#audit-settings">Job settings</a></li>
             </ul>
@@ -289,7 +279,28 @@ LIMIT 100</code></pre>
                     </div>
                 </dl>
             </section>
-            <br><br>
+
+            <section id="iis-analytics-page">
+                <h2>IIS Analytics Page <a class="anchor" href="#iis-analytics-page">#</a></h2>
+
+                <p>This page, found under Installed Plugins -> Rock Security -> IIS Analytics, includes a set of pre-built reports to help you analyze your IIS logs.
+                    The page is built with a set of IIS Log Query blocks and ChartJS charts. You can customize the page as
+                    needed or use the included blocks to build your own custom reports.</p>
+
+                <div class="callout">
+                    <p class="callout-title">Note</p>
+                    <p>The IIS Analytics page requires the Process IIS Logs job to be configured and run successfully before it will display any data.</p>
+                </div>
+                
+                <p>The Alerts section allows you to configure log queries that will trigger a notification email if the query returns any
+                    results when the Process IIS Logs job runs. This can be a powerful way to get notified about potential security incidents or other unusual activity on your Rock instance.
+                    For example, you could set up an alert for requests that indicate impersonation, if a particular user is access your site from an unusually high number of IPs,
+                    or if a user appears to be making an unusually high number of requests in a short period of time.
+                </p>
+
+                <p>Alerts also allow you to automatically block IP addresses or users when they are triggered.</p>
+            </section>
+            
 
             <h1 id="security-audit">Security Audit</h1>
 
@@ -305,46 +316,71 @@ LIMIT 100</code></pre>
 
                 <p>The following checks are run each time the Security Audit job is executed.</p>
                 
-                <h4 id="check-role-membership">Security role memberships</h4>
+                <h4 id="check-role-membership">Security Role Membership Changes</h4>
                 <p>Snapshots active members of the <em>Rock Administrators</em>, <em>Staff Workers</em>, and
                     <em>Staff-Like Workers</em> roles on the first run. Subsequent runs fail when membership changes and
                     list the people added or removed since the previous snapshot.</p>
-
-                <h4 id="check-binary-files">Binary file type security</h4>
-                <p>Checks all BinaryFile types, excluding any whitelisted types defined in the job settings,
-                    and fails the check for any type that allows public view
-                    access.</p>
-
-                <h4 id="check-document-types">Document type security</h4>
-                <p>Checks all Document types, excluding any whitelisted types defined in the job settings, and
-                    fails the check for any type that allows public view access.</p>
-
-                <h4 id="check-predictable-ids">Disable Predictable Ids</h4>
-                <p>Fails when Rock's <code>DisablePredictableIds</code> setting is not enabled. This setting prevents
-                    predictable integer identifiers from being accepted by Rock's file handlers (GetFile.ashx.cs, GetImage.ashx, and GetAvatar.ashx).
-                    When this setting is disabled, those handlers can be polled with incremental ids to probe for insecure files. 
+                
+                <h4>Protection Profile for Administrators</h4>
+                <p>Checks to ensure that the Protection Profile for the Rock Administrators role is set to EXTREME,
+                    and that "Disable Usage of Personal Tokens", which allows impersonation, is disabled for the EXTREME protection profile.
+                    This closes a known exploit for public versions of Rock allowing permissions escalation and provides a layer of protection against future exploits.
                 </p>
 
                 <h4 id="check-password-regex">Password Regular Expression</h4>
                 <p>Reads the <code>PasswordRegularExpression</code> global attribute. The check fails when the value is
                     blank or still set to Rock's default of <code>\w{6,255}</code>, which is far too weak for secure passwords.</p>
+
+                <h4 id="check-binary-files">Binary File Type Security</h4>
+                <p>Checks all BinaryFile types, excluding any whitelisted types defined in the job settings,
+                    to ensure they do not allow access to All Users or All Authenticated Users. New file types are insecure by default
+                    in Rock and should be locked down to prevent unauthorized access.</p>
+
+                <h4 id="check-document-types">Document Type Security</h4>
+                <p>Checks all Document types, excluding any whitelisted types defined in the job settings, to
+                    ensure they do not allow access to All Users or All Authenticated Users. New document types are insecure by default
+                    in Rock and should be locked down to prevent unauthorized access. Binary Files associated with Documents have their permissions
+                    checked against the Document Type, not the File Type, so it's important to ensure your Document Types are secure even if your Binary File Types are locked down.
+                </p>
+
+                <h4 id="check-predictable-ids">Disable Predictable Ids</h4>
+                <p>Fails when Rock's <code>DisablePredictableIds</code> setting is not enabled under Security Settings. This setting prevents
+                    predictable integer identifiers from being accepted by Rock's file handlers (GetFile.ashx.cs, GetImage.ashx, and GetAvatar.ashx).
+                    When this setting is disabled, those handlers can be polled with incremental ids to probe for insecure files. New File Types
+                    in Rock are insecure by default, posing a risk to your files.
+                </p>
                 
-                <h4 id="check-workflow-groups">Workflow group memberships</h4>
+                <h4>Workflow Type Permissions</h4>
+                <p>Checks to ensure all Workflow Types have been configured to disallow All Users and All Unauthenticated Users unless added to the white list on the job settings.</p>
+
+                <h4>Workflow Entry Blocks</h4>
+                <p>Checks to ensure all Workflow Entry blocks viewable by All Users or All Authenticated Users have a Workflow Type set on the block, rather than allowing
+                    any Workflow Type by Guid or Id.
+                    Allowing any workflow type by guid or ID opens the door for attacks against insecure workflows, and all workflows are created by default
+                    in Rock to be insecure.
+                </p>
+
+                <h4 id="check-workflow-groups">Workflow Group Member Add actions</h4>
                 <p>Checks Group Member Add actions in workflows to ensure any public workflows guard against permissions escalation attacks.</p>
 
-                <h4 id="check-injection">Injection-style content</h4>
-                <p>Searches Person and Location fields for values containing potential injection-style content. Matches do not
-                    indicate exploitation, but flag values that should be reviewed and cleaned.</p>
+                <h4 id="unapproved-lava-scripts">Unapproved Lava Scripts</h4>
+                <p>Checks outstanding lava approvals for high risk scripts that could potentially execute harmful actions.</p>
+
+                <h4 id="check-injection">Injection-Style Content</h4>
+                <p>Searches Person and Location fields for values containing potential injection-style content. Monitored because of a known
+                    issue in certain public versions of Rock.
+                </p>
 
                 <div class="callout warn">
                     <p class="callout-title">Warning</p>
                     <p>If you see an address or a person record returned by the injection audit, You should use SQL to review and clean up the values. Loading the person record or location in Rock may cause malicious code to run on your system. </p>
                 </div>
 
-                <h4 id="check-plugin-version">Security plugin version</h4>
+                <h4 id="check-plugin-version">Security Plugin Version</h4>
                 <p>Downloads <code>security-plugin-versions.json</code> from the published source and compares the
                     installed plugin version with the latest version published for the current Rock version.
-                    This helps ensure that the information from the plugin is the latest available. It also what includes any known security issues with your current version of Rock in the audit email. </p>
+                    This helps ensure that the information from the plugin is the latest available. It also what includes any
+                    known security issues with your current version of Rock in the audit email. </p>
 
 
                 <h3 id="audit-settings">Job settings <a class="anchor" href="#audit-settings">#</a></h3>

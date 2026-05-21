@@ -1,20 +1,22 @@
 {
-  "17.1.0": "17.0.0.0",
-  "17.2.0": "17.0.0.0",
-  "17.3.0": "17.0.0.0",
-  "17.4.0": "17.0.0.0",
-  "17.5.0": "17.0.0.0",
-  "17.6.0": "17.0.0.0",
-  "17.7.0": "17.0.0.0",
-  "18.1.0": "17.0.0.0",
-  "18.2.0": "17.0.0.0",
+  "17.1.0": "17.0.0.4",
+  "17.2.0": "17.0.0.4",
+  "17.3.0": "17.0.0.4",
+  "17.4.0": "17.0.0.4",
+  "17.5.0": "17.0.0.4",
+  "17.6.0": "17.0.0.4",
+  "17.7.0": "17.0.0.4",
+  "18.1.0": "17.0.0.4",
+  "18.2.0": "17.0.0.4",
   "notices": {
     "17.1.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
     "17.2.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
     "17.3.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
     "17.4.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
     "17.5.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
-    "17.6.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible."
+    "17.6.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
+    "18.1.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
+    "18.2.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible."
   },
   "knownGoodLavaApprovalHashes": [
     "6f41ca5e1992e856756cda467fd8e51bf2a258468d0ae622fa032ca788ecab25",

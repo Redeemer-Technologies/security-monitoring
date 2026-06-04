@@ -84,6 +84,8 @@
     <Reference Include="System.Xml.Linq" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Blocks\RestActionSecurityList.cs" />
+    <Compile Include="Blocks\RestControllerSecurityList.cs" />
     <Compile Include="Blocks\IISBlockedIpList.cs" />
     <Compile Include="Blocks\IISAlertDetail.cs" />
     <Compile Include="Blocks\IISAlertHistoryDetail.cs" />
@@ -107,6 +109,10 @@
     <Compile Include="ViewModels\LogQueryInitializationBox.cs" />
     <Compile Include="ViewModels\LogQueryRequestBag.cs" />
     <Compile Include="ViewModels\LogQueryResponseBag.cs" />
+    <Compile Include="ViewModels\RestActionSecurityBag.cs" />
+    <Compile Include="ViewModels\RestActionSecurityInitializationBox.cs" />
+    <Compile Include="ViewModels\RestControllerSecurityBag.cs" />
+    <Compile Include="ViewModels\RestControllerSecurityInitializationBox.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Rock\DotLiquid\DotLiquid.csproj">

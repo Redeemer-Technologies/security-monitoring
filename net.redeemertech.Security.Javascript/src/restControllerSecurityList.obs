@@ -1,0 +1,96 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <LoadingIndicator v-else-if="isLoading" :delay="500" />
+
+        <Grid v-else
+              title="REST Controller Security"
+              :data="gridDataSource"
+              keyField="idKey"
+              :entityTypeGuid="config.restControllerEntityTypeGuid || undefined"
+              itemTerm="REST Controller"
+              tooltipField="name"
+              stickyHeader>
+            <Column name="name"
+                    title="Controller Name"
+                    sortValue="{{ row.name }} {{ row.className }}"
+                    filterValue="{{ row.name }} {{ row.className }}"
+                    quickFilterValue="{{ row.name }} {{ row.className }}"
+                    :filter="textValueFilter"
+                    width="70%">
+                <template #format="{ row }">
+                    <strong>{{ row.name }}</strong>
+                    <div class="text-muted">{{ row.className }}</div>
+                </template>
+            </Column>
+
+            <Column name="isSecured"
+                    title="Secured"
+                    field="securityStatus"
+                    sortValue="{{ row.securityStatus }}"
+                    filterValue="{{ row.securityStatus }}"
+                    quickFilterValue="{{ row.securityStatus }}"
+                    :filter="pickExistingValueFilter"
+                    width="30%">
+                <template #format="{ row }">
+                    <span class="label"
+                          :class="row.isSecured ? 'label-success' : 'label-danger'"
+                          :title="getStatusTitle(row)">
+                        {{ row.isSecured ? "Secured" : "Insecure" }}
+                    </span>
+                </template>
+            </Column>
+
+            <SecurityColumn itemTitle="name" />
+        </Grid>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { computed, onMounted, ref } from "vue";
+    import Grid, { Column, SecurityColumn, textValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
+    import LoadingIndicator from "@Obsidian/Controls/loadingIndicator.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { RestControllerSecurityBag } from "./ViewModels/restControllerSecurityBag";
+    import { RestControllerSecurityInitializationBag } from "./ViewModels/restControllerSecurityInitializationBag";
+
+    const config = useConfigurationValues<RestControllerSecurityInitializationBag>();
+    const invokeBlockAction = useInvokeBlockAction();
+    const errorMessage = ref(config.errorMessage ?? "");
+    const isLoading = ref(!errorMessage.value);
+    const controllers = ref<RestControllerSecurityBag[]>([]);
+    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: controllers.value as Record<string, unknown>[] }));
+
+    onMounted(loadControllers);
+
+    async function loadControllers(): Promise<void> {
+        if (errorMessage.value) {
+            return;
+        }
+
+        isLoading.value = true;
+
+        const result = await invokeBlockAction<RestControllerSecurityBag[]>("GetControllers");
+
+        if (result.isSuccess && result.data) {
+            controllers.value = result.data;
+        }
+        else {
+            errorMessage.value = result.errorMessage || "Unable to load REST controller security.";
+        }
+
+        isLoading.value = false;
+    }
+
+    function getStatusTitle(row: RestControllerSecurityBag): string {
+        if (row.isSecured) {
+            return "No public or all authenticated controller-level permissions were found.";
+        }
+
+        return row.reasons.join("\n");
+    }
+</script>

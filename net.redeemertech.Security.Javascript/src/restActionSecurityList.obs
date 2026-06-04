@@ -1,0 +1,110 @@
+<template>
+    <div>
+        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+
+        <LoadingIndicator v-else-if="isLoading" :delay="500" />
+
+        <Grid v-else
+              title="REST Action Security"
+              :data="gridDataSource"
+              keyField="idKey"
+              :entityTypeGuid="config.restActionEntityTypeGuid || undefined"
+              itemTerm="REST Action"
+              tooltipField="apiId"
+              stickyHeader>
+            <Column name="action"
+                    title="Action"
+                    sortValue="{{ row.method }} {{ row.path }}"
+                    filterValue="{{ row.method }} {{ row.path }} {{ row.apiId }}"
+                    quickFilterValue="{{ row.method }} {{ row.path }} {{ row.apiId }}"
+                    :filter="textValueFilter"
+                    width="45%">
+                <template #format="{ row }">
+                    <strong>{{ row.method }}</strong>
+                    <span class="margin-l-sm">{{ row.path }}</span>
+                    <div class="text-muted">{{ row.apiId }}</div>
+                </template>
+            </Column>
+
+            <Column name="controller"
+                    title="Controller"
+                    sortValue="{{ row.controllerName }} {{ row.controllerClassName }}"
+                    filterValue="{{ row.controllerName }} {{ row.controllerClassName }}"
+                    quickFilterValue="{{ row.controllerName }} {{ row.controllerClassName }}"
+                    :filter="textValueFilter"
+                    width="35%">
+                <template #format="{ row }">
+                    <strong>{{ row.controllerName }}</strong>
+                    <div class="text-muted">{{ row.controllerClassName }}</div>
+                </template>
+            </Column>
+
+            <Column name="isSecured"
+                    title="Secured"
+                    field="securityStatus"
+                    sortValue="{{ row.securityStatus }}"
+                    filterValue="{{ row.securityStatus }}"
+                    quickFilterValue="{{ row.securityStatus }}"
+                    :filter="pickExistingValueFilter"
+                    width="20%">
+                <template #format="{ row }">
+                    <span class="label"
+                          :class="row.isSecured ? 'label-success' : 'label-danger'"
+                          :title="getStatusTitle(row)">
+                        {{ row.isSecured ? "Secured" : "Insecure" }}
+                    </span>
+                </template>
+            </Column>
+
+            <SecurityColumn itemTitle="apiId" />
+        </Grid>
+    </div>
+</template>
+
+<script setup lang="ts">
+    import { computed, onMounted, ref } from "vue";
+    import Grid, { Column, SecurityColumn, textValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
+    import LoadingIndicator from "@Obsidian/Controls/loadingIndicator.obs";
+    import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import { AlertType } from "@Obsidian/Enums/Controls/alertType";
+    import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
+    import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
+    import { RestActionSecurityBag } from "./ViewModels/restActionSecurityBag";
+    import { RestActionSecurityInitializationBag } from "./ViewModels/restActionSecurityInitializationBag";
+
+    const config = useConfigurationValues<RestActionSecurityInitializationBag>();
+    const invokeBlockAction = useInvokeBlockAction();
+    const errorMessage = ref(config.errorMessage ?? "");
+    const isLoading = ref(!errorMessage.value);
+    const actions = ref<RestActionSecurityBag[]>([]);
+    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: actions.value as Record<string, unknown>[] }));
+
+    onMounted(loadActions);
+
+    async function loadActions(): Promise<void> {
+        if (errorMessage.value) {
+            return;
+        }
+
+        isLoading.value = true;
+
+        const result = await invokeBlockAction<RestActionSecurityBag[]>("GetActions");
+
+        if (result.isSuccess && result.data) {
+            actions.value = result.data;
+        }
+        else {
+            errorMessage.value = result.errorMessage || "Unable to load REST action security.";
+        }
+
+        isLoading.value = false;
+    }
+
+    function getStatusTitle(row: RestActionSecurityBag): string {
+        if (row.isSecured) {
+            return "No public or all authenticated action-level permissions were found.";
+        }
+
+        return row.reasons.join("\n");
+    }
+</script>

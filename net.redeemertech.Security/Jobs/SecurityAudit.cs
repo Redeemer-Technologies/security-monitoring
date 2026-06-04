@@ -113,6 +113,7 @@ namespace net.redeemertech.Security
                     AuditDisablePredictableIds(),
                     AuditAccountProtectionProfileSettings( rockContext ),
                     AuditPasswordRegularExpression(),
+                    AuditDefaultEnabledLavaCommands(),
                     AuditSecurityRoleMemberships( rockContext ),
                     AuditSqlInjectionContent( rockContext ),
                     AuditUnapprovedLavaScripts( rockContext, securityPluginVersionData ),
@@ -1835,6 +1836,39 @@ namespace net.redeemertech.Security
                     ? "Update the Password Regular Expression global attribute to enforce a stronger password policy."
                     : string.Empty
             };
+        }
+
+        private AuditCheckResult AuditDefaultEnabledLavaCommands()
+        {
+            const string defaultEnabledLavaCommandsKey = "DefaultEnabledLavaCommands";
+            const string entityCommandsValue = "RockEntity";
+
+            var defaultEnabledLavaCommands = GlobalAttributesCache.Get().GetValue( defaultEnabledLavaCommandsKey );
+            var onlyEntityCommandsEnabled = DefaultEnabledLavaCommandsAllowsOnlyEntityCommands( defaultEnabledLavaCommands );
+
+            return new AuditCheckResult
+            {
+                Name = "Default Enabled Lava Commands",
+                IsPassing = onlyEntityCommandsEnabled,
+                Summary = onlyEntityCommandsEnabled
+                    ? "Default Enabled Lava Commands: Global attribute only allows Entity Commands."
+                    : string.Format( "Default Enabled Lava Commands: Global attribute allows '{0}' instead of only Entity Commands.", defaultEnabledLavaCommands.IsNotNullOrWhiteSpace() ? defaultEnabledLavaCommands : "(blank)" ),
+                Details = onlyEntityCommandsEnabled
+                    ? string.Empty
+                    : string.Format( "Update the Default Enabled Lava Commands global attribute to contain only {0} (Entity Commands).", entityCommandsValue )
+            };
+        }
+
+        private bool DefaultEnabledLavaCommandsAllowsOnlyEntityCommands( string defaultEnabledLavaCommands )
+        {
+            var enabledCommands = ( defaultEnabledLavaCommands ?? string.Empty )
+                .SplitDelimitedValues( ",", StringSplitOptions.RemoveEmptyEntries )
+                .Select( c => c.Trim() )
+                .Where( c => c.IsNotNullOrWhiteSpace() )
+                .ToList();
+
+            return enabledCommands.Count == 1
+                && enabledCommands[0].Equals( "RockEntity", StringComparison.OrdinalIgnoreCase );
         }
 
         private AuditCheckResult AuditAccountProtectionProfileSettings( RockContext rockContext )

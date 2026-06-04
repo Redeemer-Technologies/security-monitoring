@@ -143,6 +143,28 @@ namespace net.redeemertech.Security.Tests
             Assert.IsFalse( InvokePrivate<bool>( "ContainsApprovalRequiredLava", content ) );
         }
 
+        [DataTestMethod]
+        [DataRow( "RockEntity" )]
+        [DataRow( " RockEntity " )]
+        [DataRow( "rockentity" )]
+        public void DefaultEnabledLavaCommandsAllowsOnlyEntityCommandsReturnsTrueForOnlyRockEntity( string enabledCommands )
+        {
+            Assert.IsTrue( InvokePrivate<bool>( "DefaultEnabledLavaCommandsAllowsOnlyEntityCommands", enabledCommands ) );
+        }
+
+        [DataTestMethod]
+        [DataRow( null )]
+        [DataRow( "" )]
+        [DataRow( "   " )]
+        [DataRow( "All" )]
+        [DataRow( "Sql" )]
+        [DataRow( "RockEntity,Sql" )]
+        [DataRow( "Sql,RockEntity" )]
+        public void DefaultEnabledLavaCommandsAllowsOnlyEntityCommandsReturnsFalseForOtherValues( string enabledCommands )
+        {
+            Assert.IsFalse( InvokePrivate<bool>( "DefaultEnabledLavaCommandsAllowsOnlyEntityCommands", enabledCommands ) );
+        }
+
         /// <summary>
         /// Loads version data from a fixture file in the test project's Fixtures directory.
         /// </summary>

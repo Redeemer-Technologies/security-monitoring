@@ -16,6 +16,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public string ControllerClassName { get; set; }
 
+        public int? RequestCountLast30Days { get; set; }
+
         public bool IsSecured { get; set; }
 
         public string SecurityStatus { get; set; }

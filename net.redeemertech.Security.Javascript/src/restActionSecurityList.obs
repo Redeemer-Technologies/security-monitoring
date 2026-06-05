@@ -20,9 +20,11 @@
                     :filter="textValueFilter"
                     width="45%">
                 <template #format="{ row }">
-                    <strong>{{ row.method }}</strong>
-                    <span class="margin-l-sm">{{ row.path }}</span>
-                    <div class="text-muted">{{ row.apiId }}</div>
+                    <div>
+                        <strong>{{ row.method }}</strong>
+                        <div>{{ row.path }}</div>
+                        <div class="text-muted">{{ row.apiId }}</div>
+                    </div>
                 </template>
             </Column>
 
@@ -32,10 +34,27 @@
                     filterValue="{{ row.controllerName }} {{ row.controllerClassName }}"
                     quickFilterValue="{{ row.controllerName }} {{ row.controllerClassName }}"
                     :filter="textValueFilter"
-                    width="35%">
+                    width="30%">
                 <template #format="{ row }">
-                    <strong>{{ row.controllerName }}</strong>
-                    <div class="text-muted">{{ row.controllerClassName }}</div>
+                    <div>
+                        <strong>{{ row.controllerName }}</strong><br>
+                        <div class="text-muted">{{ row.controllerClassName }}</div>
+                    </div>
+                </template>
+            </Column>
+
+            <Column name="requestCountLast30Days"
+                    title="30 Day Calls"
+                    field="requestCountLast30Days"
+                    sortValue="{{ row.requestCountLast30Days }}"
+                    filterValue="{{ row.requestCountLast30Days }}"
+                    quickFilterValue="{{ row.requestCountLast30Days }}"
+                    width="10%">
+                <template #format="{ row }">
+                    <span v-if="row.requestCountLast30Days !== null && row.requestCountLast30Days !== undefined">
+                        {{ row.requestCountLast30Days.toLocaleString() }}
+                    </span>
+                    <span v-else class="text-muted">Unavailable</span>
                 </template>
             </Column>
 
@@ -46,7 +65,7 @@
                     filterValue="{{ row.securityStatus }}"
                     quickFilterValue="{{ row.securityStatus }}"
                     :filter="pickExistingValueFilter"
-                    width="20%">
+                    width="15%">
                 <template #format="{ row }">
                     <span class="label"
                           :class="row.isSecured ? 'label-success' : 'label-danger'"

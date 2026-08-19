@@ -19,13 +19,19 @@
     "17.5.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
     "17.6.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
     "18.1.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible.",
-    "18.2.0": "There is a known privilege escalation bug affecting your version of Rock. Please update as soon as possible."
+    "18.2.0": "There is a known privilege escalaton bug affecting your version of Rock. Please update as soon as possible."
   },
   "knownGoodLavaApprovalHashes": [
     "6f41ca5e1992e856756cda467fd8e51bf2a258468d0ae622fa032ca788ecab25",
     "135b8f9811b68c8fb64467fa545355841a07f4c22f3d5fdc0d912881847a2ac1",
     "3f0a580b037363893dbe7d968ae74c80431cf4f45276c02a478a051c0000c0de",
     "42618a6221431bcf823ca21eb593bb4bb7209762ff68ec96ac922322c4339974",
-    "696bf110e97dddb96f46038afa98f36dee8104d6efa79ab456c021128a67f392"
+    "696bf110e97dddb96f46038afa98f36dee8104d6efa79ab456c021128a67f392",
+    "c8bdc7cca9a506052eb2c189bcbf6e11bd33f4f4a7943141c5f0236211b24951",
+    "3850abcc89e6ab8c56f5504f4aad7417ea81b1dbd0a50adba5e3d7968082cd6e",
+    "3ad5f4b0fcc064c15eab835b87b8067e07fbc33d29ac97b0824c06a818b5defe",
+    "be79bf9c640a7337670c5dace4761759654949502e1f49bac701b05cff211bdf",
+    "2aaea6f9bf027926e2bbf0d8932c638af2049428b3ef9c58ea555639ea320ff6",
+    "434ce676ea96c0982ef267866912cfea3db96cc0f152af140c394735bbcf290c"
   ]
 }

@@ -72,7 +72,15 @@
   <ItemGroup>
     <Compile Include="IISLogDuckDbQueryTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RestActionRequestCountMatcherTests.cs" />
+    <Compile Include="RockUiRestActionCatalogTests.cs" />
     <Compile Include="SecurityAuditVersionMatchingTests.cs" />
+    <Compile Include="..\net.redeemertech.Security.Blocks\Blocks\RestActionRequestCountMatcher.cs">
+      <Link>RestActionRequestCountMatcher.cs</Link>
+    </Compile>
+    <Compile Include="..\net.redeemertech.Security.Blocks\Blocks\RockUiRestActionCatalog.cs">
+      <Link>RockUiRestActionCatalog.cs</Link>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures\security-plugin-versions-basic.json" />

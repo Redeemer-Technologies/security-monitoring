@@ -18,6 +18,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public int? RequestCountLast30Days { get; set; }
 
+        public bool IsNeededByRock { get; set; }
+
         public bool IsSecured { get; set; }
 
         public string SecurityStatus { get; set; }

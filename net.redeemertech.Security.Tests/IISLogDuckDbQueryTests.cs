@@ -122,6 +122,27 @@ namespace net.redeemertech.Security.Tests
             Assert.AreEqual( 42, dataTable.Rows[0]["impersonated_person_id"] );
         }
 
+        [TestMethod]
+        public void ExecuteProvidesNullUriQueryWhenParquetSchemaDoesNotContainIt()
+        {
+            var folder = CreateTempFolder();
+            CreateParquetFile(
+                folder,
+                DateTime.Today.ToString( "yyyyMMdd" ) + "_no_query.parquet",
+                "SELECT 'GET' AS \"cs-method\", '/api/people' AS \"cs-uri-stem\"" );
+
+            var query = new IISLogDuckDbQuery();
+            var dataTable = query.Execute(
+                "SELECT \"cs-uri-query\" FROM [[logs]]",
+                "-1||||",
+                folder,
+                100,
+                30 );
+
+            Assert.AreEqual( 1, dataTable.Rows.Count );
+            Assert.AreEqual( DBNull.Value, dataTable.Rows[0]["cs-uri-query"] );
+        }
+
         private string CreateTempFolder( string name = null )
         {
             var folder = Path.Combine( Path.GetTempPath(), "IISLogDuckDbQueryTests", Guid.NewGuid().ToString( "N" ), name ?? "logs" );

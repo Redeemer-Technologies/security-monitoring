@@ -289,7 +289,7 @@ namespace net.redeemertech.Security
 
         private static string GetRawLogsSql( string fileList )
         {
-            return "( SELECT CAST(NULL AS BIGINT) AS \"sc-bytes\", CAST(NULL AS VARCHAR) AS \"cs-host\", CAST(NULL AS VARCHAR) AS \"cs-username\" WHERE 1 = 0 UNION ALL BY NAME SELECT * FROM read_parquet(" + fileList + ", union_by_name = true) )";
+            return "( SELECT CAST(NULL AS BIGINT) AS \"sc-bytes\", CAST(NULL AS VARCHAR) AS \"cs-host\", CAST(NULL AS VARCHAR) AS \"cs-username\", CAST(NULL AS VARCHAR) AS \"cs-uri-query\" WHERE 1 = 0 UNION ALL BY NAME SELECT * FROM read_parquet(" + fileList + ", union_by_name = true) )";
         }
 
         private static DataTable LoadDataTable( IDataReader reader )

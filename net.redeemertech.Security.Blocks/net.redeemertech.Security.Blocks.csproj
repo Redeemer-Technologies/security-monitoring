@@ -85,6 +85,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Blocks\RestActionSecurityList.cs" />
+    <Compile Include="Blocks\RestActionRequestCountMatcher.cs" />
+    <Compile Include="Blocks\RockUiRestActionCatalog.cs" />
     <Compile Include="Blocks\RestControllerSecurityList.cs" />
     <Compile Include="Blocks\IISBlockedIpList.cs" />
     <Compile Include="Blocks\IISAlertDetail.cs" />

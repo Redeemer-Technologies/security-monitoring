@@ -2,8 +2,6 @@
     <div>
         <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
 
-        <LoadingIndicator v-else-if="isLoading" :delay="500" />
-
         <Grid v-else
               title="REST Action Security"
               :data="gridDataSource"
@@ -18,12 +16,20 @@
                     filterValue="{{ row.method }} {{ row.path }} {{ row.apiId }}"
                     quickFilterValue="{{ row.method }} {{ row.path }} {{ row.apiId }}"
                     :filter="textValueFilter"
-                    width="45%">
+                    width="38%">
                 <template #format="{ row }">
                     <div>
                         <strong>{{ row.method }}</strong>
                         <div>{{ row.path }}</div>
                         <div class="text-muted">{{ row.apiId }}</div>
+                    </div>
+                </template>
+
+                <template #skeleton>
+                    <div class="w-100">
+                        <div class="skeleton skeleton-text" style="max-width: 80px;"></div>
+                        <div class="skeleton skeleton-text"></div>
+                        <div class="skeleton skeleton-text"></div>
                     </div>
                 </template>
             </Column>
@@ -34,14 +40,28 @@
                     filterValue="{{ row.controllerName }} {{ row.controllerClassName }}"
                     quickFilterValue="{{ row.controllerName }} {{ row.controllerClassName }}"
                     :filter="textValueFilter"
-                    width="30%">
+                    width="22%">
                 <template #format="{ row }">
                     <div>
                         <strong>{{ row.controllerName }}</strong><br>
                         <div class="text-muted">{{ row.controllerClassName }}</div>
                     </div>
                 </template>
+
+                <template #skeleton>
+                    <div class="w-100">
+                        <div class="skeleton skeleton-text"></div>
+                        <div class="skeleton skeleton-text"></div>
+                    </div>
+                </template>
             </Column>
+
+            <BooleanColumn name="isNeededByRock"
+                           title="Needed by Rock"
+                           field="isNeededByRock"
+                           :filter="booleanValueFilter"
+                           :skeletonComponent="TextSkeletonCell"
+                           width="10%" />
 
             <Column name="requestCountLast30Days"
                     title="30 Day Calls"
@@ -49,6 +69,7 @@
                     sortValue="{{ row.requestCountLast30Days }}"
                     filterValue="{{ row.requestCountLast30Days }}"
                     quickFilterValue="{{ row.requestCountLast30Days }}"
+                    :skeletonComponent="NumberSkeletonCell"
                     width="10%">
                 <template #format="{ row }">
                     <span v-if="row.requestCountLast30Days !== null && row.requestCountLast30Days !== undefined">
@@ -65,13 +86,17 @@
                     filterValue="{{ row.securityStatus }}"
                     quickFilterValue="{{ row.securityStatus }}"
                     :filter="pickExistingValueFilter"
-                    width="15%">
+                    width="12%">
                 <template #format="{ row }">
                     <span class="label"
                           :class="row.isSecured ? 'label-success' : 'label-danger'"
                           :title="getStatusTitle(row)">
                         {{ row.isSecured ? "Secured" : "Insecure" }}
                     </span>
+                </template>
+
+                <template #skeleton>
+                    <div class="skeleton skeleton-text skeleton-rounded" style="max-width: 80px;" />
                 </template>
             </Column>
 
@@ -81,9 +106,8 @@
 </template>
 
 <script setup lang="ts">
-    import { computed, onMounted, ref } from "vue";
-    import Grid, { Column, SecurityColumn, textValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
-    import LoadingIndicator from "@Obsidian/Controls/loadingIndicator.obs";
+    import { ref } from "vue";
+    import Grid, { BooleanColumn, Column, NumberSkeletonCell, SecurityColumn, TextSkeletonCell, booleanValueFilter, textValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
@@ -94,34 +118,29 @@
     const config = useConfigurationValues<RestActionSecurityInitializationBag>();
     const invokeBlockAction = useInvokeBlockAction();
     const errorMessage = ref(config.errorMessage ?? "");
-    const isLoading = ref(!errorMessage.value);
-    const actions = ref<RestActionSecurityBag[]>([]);
-    const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: actions.value as Record<string, unknown>[] }));
+    const gridDataSource = ref<Promise<GridDataBag>>();
 
-    onMounted(loadActions);
-
-    async function loadActions(): Promise<void> {
-        if (errorMessage.value) {
-            return;
-        }
-
-        isLoading.value = true;
-
+    async function loadActions(): Promise<GridDataBag> {
         const result = await invokeBlockAction<RestActionSecurityBag[]>("GetActions");
 
         if (result.isSuccess && result.data) {
-            actions.value = result.data;
-        }
-        else {
-            errorMessage.value = result.errorMessage || "Unable to load REST action security.";
+            return { rows: result.data as Record<string, unknown>[] };
         }
 
-        isLoading.value = false;
+        throw new Error(result.errorMessage || "Unable to load REST action security.");
+    }
+
+    if (!errorMessage.value) {
+        gridDataSource.value = loadActions();
     }
 
     function getStatusTitle(row: RestActionSecurityBag): string {
         if (row.isSecured) {
-            return "No public or all authenticated action-level permissions were found.";
+            if (row.isNeededByRock) {
+                return "No public or all authenticated action-level permissions were found.";
+            }
+
+            return "All Users is the first explicit deny rule on this action.";
         }
 
         return row.reasons.join("\n");

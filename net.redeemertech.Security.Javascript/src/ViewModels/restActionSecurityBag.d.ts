@@ -6,6 +6,7 @@ export type RestActionSecurityBag = {
     controllerName: string;
     controllerClassName: string;
     requestCountLast30Days?: number | null;
+    isNeededByRock: boolean;
     isSecured: boolean;
     securityStatus: string;
     isSecurityDisabled: boolean;

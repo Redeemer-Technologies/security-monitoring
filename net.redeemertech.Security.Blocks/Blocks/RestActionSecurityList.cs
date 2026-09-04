@@ -13,7 +13,6 @@ using System.ComponentModel;
 using System.Data;
 using System.Data.Entity;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace net.redeemertech.Security.Blocks.Blocks
 {
@@ -117,11 +116,49 @@ namespace net.redeemertech.Security.Blocks.Blocks
 
         private RestActionSecurityBag ToSecurityBag( RestAction action, Person allAuthenticatedUser )
         {
-            var supportedActions = action.SupportedActions
+            var isNeededByRock = RockUiRestActionCatalog.IsNeededByRock( action.Controller?.ClassName, action.Method, action.Path );
+            var supportedActions = GetSupportedSecurityActions( action );
+            List<string> reasons;
+            bool isSecured;
+
+            if ( isNeededByRock )
+            {
+                reasons = GetOpenAccessReasons( action, supportedActions, allAuthenticatedUser );
+                isSecured = !reasons.Any();
+            }
+            else
+            {
+                reasons = GetMissingAllUsersDenyReasons( action, supportedActions );
+                isSecured = !reasons.Any();
+            }
+
+            return new RestActionSecurityBag
+            {
+                IdKey = action.IdKey,
+                Method = action.Method,
+                Path = action.Path,
+                ApiId = action.ApiId,
+                ControllerName = action.Controller?.Name,
+                ControllerClassName = action.Controller?.ClassName,
+                RequestCountLast30Days = null,
+                IsNeededByRock = isNeededByRock,
+                IsSecured = isSecured,
+                SecurityStatus = isSecured ? "Secured" : "Insecure",
+                IsSecurityDisabled = !action.IsAuthorized( Authorization.ADMINISTRATE, RequestContext.CurrentPerson ),
+                Reasons = reasons
+            };
+        }
+
+        private static List<string> GetSupportedSecurityActions( RestAction action )
+        {
+            return action.SupportedActions
                 .Where( a => SecurityActionsToCheck.Contains( a.Key ) )
                 .Select( a => a.Key )
                 .ToList();
+        }
 
+        private static List<string> GetOpenAccessReasons( RestAction action, List<string> supportedActions, Person allAuthenticatedUser )
+        {
             var reasons = new List<string>();
 
             foreach ( var securityAction in supportedActions )
@@ -137,20 +174,47 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 }
             }
 
-            return new RestActionSecurityBag
+            return reasons;
+        }
+
+        private static List<string> GetMissingAllUsersDenyReasons( RestAction action, List<string> supportedActions )
+        {
+            var reasons = new List<string>();
+
+            if ( !supportedActions.Any() )
             {
-                IdKey = action.IdKey,
-                Method = action.Method,
-                Path = action.Path,
-                ApiId = action.ApiId,
-                ControllerName = action.Controller?.Name,
-                ControllerClassName = action.Controller?.ClassName,
-                RequestCountLast30Days = null,
-                IsSecured = !reasons.Any(),
-                SecurityStatus = reasons.Any() ? "Insecure" : "Secured",
-                IsSecurityDisabled = !action.IsAuthorized( Authorization.ADMINISTRATE, RequestContext.CurrentPerson ),
-                Reasons = reasons
-            };
+                reasons.Add( "This action has no REST security actions to deny." );
+                return reasons;
+            }
+
+            var authorizations = Authorization.Get();
+            var entityTypeId = action.TypeId;
+
+            foreach ( var securityAction in supportedActions )
+            {
+                List<AuthRule> rules = null;
+                if ( authorizations != null
+                    && authorizations.ContainsKey( entityTypeId )
+                    && authorizations[entityTypeId].ContainsKey( action.Id )
+                    && authorizations[entityTypeId][action.Id].ContainsKey( securityAction ) )
+                {
+                    rules = authorizations[entityTypeId][action.Id][securityAction];
+                }
+
+                if ( rules == null || !rules.Any() )
+                {
+                    reasons.Add( string.Format( "{0} has no explicit Deny All Users rule.", securityAction ) );
+                    continue;
+                }
+
+                var firstRule = rules[0];
+                if ( firstRule.SpecialRole != SpecialRole.AllUsers || firstRule.AllowOrDeny != 'D' )
+                {
+                    reasons.Add( string.Format( "{0} does not have All Users as the first explicit deny rule.", securityAction ) );
+                }
+            }
+
+            return reasons;
         }
 
         private void AddRequestCounts( List<RestActionSecurityBag> actions )
@@ -161,26 +225,36 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 return;
             }
 
-            foreach ( var action in actions )
+            var matcher = new RestActionRequestCountMatcher( actions.Select( ( action, index ) => new RestActionRouteDefinition
             {
-                if ( endpointCounts.TryGetValue( GetEndpointCountKey( action.Method, action.Path ), out var requestCount ) )
-                {
-                    action.RequestCountLast30Days = requestCount;
-                    continue;
-                }
+                ActionIndex = index,
+                Method = action.Method,
+                RouteTemplate = action.Path
+            } ) );
+            var countsByActionIndex = new int[actions.Count];
 
-                action.RequestCountLast30Days = endpointCounts
-                    .Where( c => IsRouteMatch( action.Method, action.Path, c.Key ) )
-                    .Sum( c => c.Value );
+            foreach ( var endpointCount in endpointCounts )
+            {
+                var actionIndex = matcher.FindActionIndex( endpointCount.Method, endpointCount.Path, endpointCount.Query );
+                if ( actionIndex.HasValue )
+                {
+                    countsByActionIndex[actionIndex.Value] += endpointCount.Count;
+                }
+            }
+
+            for ( var i = 0; i < actions.Count; i++ )
+            {
+                actions[i].RequestCountLast30Days = countsByActionIndex[i];
             }
         }
 
-        private Dictionary<string, int> GetEndpointCountsLast30Days()
+        private List<EndpointRequestCount> GetEndpointCountsLast30Days()
         {
             const string query = @"
 SELECT
     UPPER(""cs-method"") AS method,
     REGEXP_REPLACE(COALESCE(""cs-uri-stem"", ''), '^/+', '') AS path,
+    COALESCE(""cs-uri-query"", '') AS uri_query,
     COUNT(*) AS request_count
 FROM [[logs]]
 WHERE ""cs-uri-stem"" IS NOT NULL
@@ -188,7 +262,7 @@ WHERE ""cs-uri-stem"" IS NOT NULL
         LOWER(""cs-uri-stem"") LIKE '/api/%'
         OR LOWER(""cs-uri-stem"") LIKE 'api/%'
     )
-GROUP BY 1, 2";
+GROUP BY 1, 2, 3";
 
             try
             {
@@ -201,11 +275,14 @@ GROUP BY 1, 2";
 
                 return dataTable.Rows
                     .OfType<DataRow>()
-                    .GroupBy( r => GetEndpointCountKey( r["method"].ToStringSafe(), r["path"].ToStringSafe() ), StringComparer.OrdinalIgnoreCase )
-                    .ToDictionary(
-                        g => g.Key,
-                        g => g.Sum( r => Convert.ToInt32( r["request_count"] ) ),
-                        StringComparer.OrdinalIgnoreCase );
+                    .Select( r => new EndpointRequestCount
+                    {
+                        Method = r["method"].ToStringSafe(),
+                        Path = r["path"].ToStringSafe(),
+                        Query = r["uri_query"].ToStringSafe(),
+                        Count = Convert.ToInt32( r["request_count"] )
+                    } )
+                    .ToList();
             }
             catch
             {
@@ -213,41 +290,12 @@ GROUP BY 1, 2";
             }
         }
 
-        private static bool IsRouteMatch( string method, string routeTemplate, string requestKey )
+        private sealed class EndpointRequestCount
         {
-            var keyParts = requestKey.Split( new[] { '|' }, 2 );
-            if ( keyParts.Length != 2 || !keyParts[0].Equals( ( method ?? string.Empty ).Trim(), StringComparison.OrdinalIgnoreCase ) )
-            {
-                return false;
-            }
-
-            var requestPath = keyParts[1];
-            routeTemplate = NormalizeApiPath( routeTemplate );
-            requestPath = NormalizeApiPath( requestPath );
-
-            if ( routeTemplate.IsNullOrWhiteSpace() || requestPath.IsNullOrWhiteSpace() )
-            {
-                return false;
-            }
-
-            var routeWithoutQuery = routeTemplate.Split( '?' ).FirstOrDefault();
-            var requestWithoutQuery = requestPath.Split( '?' ).FirstOrDefault();
-            var regexPattern = "^" + Regex.Escape( routeWithoutQuery )
-                .Replace( "\\{", "{" )
-                .Replace( "\\}", "}" );
-
-            regexPattern = Regex.Replace( regexPattern, @"\{[^}/]+\}", @"[^/]+" ) + "$";
-            return Regex.IsMatch( requestWithoutQuery, regexPattern, RegexOptions.IgnoreCase );
-        }
-
-        private static string GetEndpointCountKey( string method, string path )
-        {
-            return ( method ?? string.Empty ).Trim().ToUpperInvariant() + "|" + NormalizeApiPath( path );
-        }
-
-        private static string NormalizeApiPath( string path )
-        {
-            return ( path ?? string.Empty ).Trim().TrimStart( '/' );
+            public string Method { get; set; }
+            public string Path { get; set; }
+            public string Query { get; set; }
+            public int Count { get; set; }
         }
 
         private bool CanView()

@@ -54,6 +54,7 @@ namespace net.redeemertech.Security
             var summary = new LavaApprovalAiEvaluationSummary();
 
             var reviewItems = new List<LavaApprovalAiReviewItem>();
+            var lavaWebhookAttributeValueIds = GetLavaWebhookTemplateAttributeValueIds( rockContext );
 
             foreach ( var sourceGroup in sources.GroupBy( s => s.ContentHash, StringComparer.OrdinalIgnoreCase ) )
             {
@@ -89,7 +90,11 @@ namespace net.redeemertech.Security
                 {
                     ContentHash = sourceGroup.Key,
                     Content = content,
-                    Sources = sourceList
+                    Sources = sourceList,
+                    IsLavaWebhook = sourceList.Any( s =>
+                        s.TableName.Equals( "AttributeValue", StringComparison.OrdinalIgnoreCase ) &&
+                        s.ColumnName.Equals( "Value", StringComparison.OrdinalIgnoreCase ) &&
+                        lavaWebhookAttributeValueIds.Contains( s.RowId ) )
                 } );
             }
 
@@ -100,7 +105,7 @@ namespace net.redeemertech.Security
                     .Select( item => new
                     {
                         Item = item,
-                        Task = Task.Run( () => EvaluateContent( openAIApiKey, modelName, item.Content ) )
+                        Task = Task.Run( () => EvaluateContent( openAIApiKey, modelName, item.Content, item.IsLavaWebhook ) )
                     } )
                     .ToList();
 
@@ -150,7 +155,7 @@ namespace net.redeemertech.Security
             return ex.InnerException?.Message ?? ex.Message;
         }
 
-        private LavaApprovalAiEvaluationResult EvaluateContent( string openAIApiKey, string modelName, string content )
+        private LavaApprovalAiEvaluationResult EvaluateContent( string openAIApiKey, string modelName, string content, bool isLavaWebhook )
         {
             var serializer = new JavaScriptSerializer
             {
@@ -170,7 +175,7 @@ namespace net.redeemertech.Security
                     new Dictionary<string, object>
                     {
                         { "role", "user" },
-                        { "content", "Evaluate this Lava/Liquid content:\n\n```liquid\n" + content + "\n```" }
+                        { "content", BuildUserPrompt( content, isLavaWebhook ) }
                     }
                 } }
             };
@@ -264,6 +269,32 @@ RunLava runs the lava passed in with the permissions context of the script that 
 If we're doing SQL inserts or updates on strings, even if the input is sanitized from a SQL perspective by using SanitizeSql or SQL parameters, there's the possiblity that the content
 could contain scripts, Lava, or HTML that could later be rendered in an unsafe way. So that could be a concern even if the SQL is safe, though not the foremost concern.
 Treat direct script output, unsafe HTML rendering, unsanitized request/query/form values, dynamic SQL, and entity queries without permissions checks as concerns.";
+        }
+
+        private string BuildUserPrompt( string content, bool isLavaWebhook )
+        {
+            var sourceContext = isLavaWebhook
+                ? @"Evaluation context: This script is a Rock RMS Lava Webhook template. Rock's webhook handler does not enforce authentication or authorization before running the template, so data it returns must be treated as publicly accessible unless the script itself has effective authentication and authorization gating.
+
+For this webhook script, apply these additional requirements:
+- If it can query or return data beyond a narrowly defined, non-sensitive subset, it must contain effective authentication and authorization gating. Rate it high risk if that gating is absent or can be bypassed.
+- Rate it high risk if request-controlled input can select or look up entity data by ID. This enables ID swapping and must not be treated as safe merely because the ID is numeric, sanitized, or parameterized.
+- Continue to apply all SQL injection, JavaScript injection, XSS, unsafe HTML, RunLava, and other checks from the system instructions.
+
+"
+                : string.Empty;
+
+            return sourceContext + "Evaluate this Lava/Liquid content:\n\n```liquid\n" + content + "\n```";
+        }
+
+        private HashSet<int> GetLavaWebhookTemplateAttributeValueIds( RockContext rockContext )
+        {
+            return new HashSet<int>( rockContext.Database.SqlQuery<int>( @"
+                SELECT [av].[Id]
+                FROM [dbo].[AttributeValue] [av]
+                INNER JOIN [dbo].[Attribute] [a] ON [a].[Id] = [av].[AttributeId]
+                WHERE [a].[Guid] = @AttributeGuid",
+                new SqlParameter( "@AttributeGuid", LavaApprovalSourceClassifier.LavaWebhookTemplateAttributeGuid.AsGuid() ) ).ToList() );
         }
 
         private LavaApprovalAiEvaluationResult ParseResult( string rawResponse )
@@ -406,6 +437,8 @@ Treat direct script output, unsafe HTML rendering, unsanitized request/query/for
             public string Content { get; set; }
 
             public List<LavaApprovalSource> Sources { get; set; }
+
+            public bool IsLavaWebhook { get; set; }
         }
 
         private class LavaSourceTarget

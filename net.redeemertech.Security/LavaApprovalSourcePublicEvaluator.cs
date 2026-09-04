@@ -35,13 +35,26 @@ namespace net.redeemertech.Security
             var context = rockContext.Database.SqlQuery<AttributeValueEntityContext>( @"
                 SELECT
                     [av].[EntityId],
-                    [a].[EntityTypeId] AS [AttributeEntityTypeId]
+                    [a].[EntityTypeId] AS [AttributeEntityTypeId],
+                    [a].[Guid] AS [AttributeGuid]
                 FROM [dbo].[AttributeValue] [av]
                 INNER JOIN [dbo].[Attribute] [a] ON [a].[Id] = [av].[AttributeId]
                 WHERE [av].[Id] = @AttributeValueId",
                 new SqlParameter( "@AttributeValueId", rowId ) ).FirstOrDefault();
 
-            if ( context == null || !context.EntityId.HasValue || !context.AttributeEntityTypeId.HasValue )
+            if ( context == null )
+            {
+                return null;
+            }
+
+            // Rock's Lava webhook handler does not enforce authentication or authorization itself.
+            // Treat its output as public unless the template implements its own access control.
+            if ( context.AttributeGuid == LavaApprovalSourceClassifier.LavaWebhookTemplateAttributeGuid.AsGuid() )
+            {
+                return true;
+            }
+
+            if ( !context.EntityId.HasValue || !context.AttributeEntityTypeId.HasValue )
             {
                 return null;
             }
@@ -207,6 +220,8 @@ namespace net.redeemertech.Security
             public int? EntityId { get; set; }
 
             public int? AttributeEntityTypeId { get; set; }
+
+            public Guid AttributeGuid { get; set; }
         }
 
         private class WorkflowEntryBlockContext

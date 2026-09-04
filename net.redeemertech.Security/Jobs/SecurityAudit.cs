@@ -1546,7 +1546,8 @@ namespace net.redeemertech.Security
                     WHERE ([Attribute].[Name] LIKE '%sql%'
                     OR [Attribute].[Name] LIKE '%Lava%'
                     OR [Attribute].[Name] LIKE '%Query%'
-                    OR [Attribute].[Guid] = '01C9BA59-D8D4-4137-90A6-B3C06C70BBC3')
+                    OR [Attribute].[Guid] = '01C9BA59-D8D4-4137-90A6-B3C06C70BBC3'
+                    OR [Attribute].[Guid] = '" + LavaApprovalSourceClassifier.LavaWebhookTemplateAttributeGuid + @"') -- Lava Webhook 'Template'
                     -- Things to ignore
                     AND [Attribute].[Key] NOT IN ('QueryTimeoutSeconds','CommandTimeoutSeconds','SqlCommandTimeout','SaveSQLForDebug')
                     AND [FieldType].[Name] NOT IN ('Boolean', 'Lava Commands')

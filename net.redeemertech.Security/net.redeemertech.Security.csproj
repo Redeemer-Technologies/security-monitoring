@@ -102,6 +102,7 @@
     <Compile Include="DuckDbNativeLibrary.cs" />
     <Compile Include="IISLogDuckDbQuery.cs" />
     <Compile Include="LavaApprovalAiEvaluator.cs" />
+    <Compile Include="LavaApprovalSourceClassifier.cs" />
     <Compile Include="LavaApprovalSourcePublicEvaluator.cs" />
     <Compile Include="Jobs\ProcessIISLogs.cs" />
     <Compile Include="Jobs\SecurityAudit.cs" />

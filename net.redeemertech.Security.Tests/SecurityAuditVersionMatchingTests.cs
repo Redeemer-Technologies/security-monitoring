@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Serialization;
@@ -141,6 +142,26 @@ namespace net.redeemertech.Security.Tests
         public void ContainsApprovalRequiredLavaReturnsFalseForNonLavaContent( string content )
         {
             Assert.IsFalse( InvokePrivate<bool>( "ContainsApprovalRequiredLava", content ) );
+        }
+
+        [TestMethod]
+        public void LavaApprovalScanTargetsExplicitlyIncludeLavaWebhookTemplates()
+        {
+            var targets = InvokePrivate<IEnumerable>( "GetLavaApprovalScanTargets" );
+            string attributeValueWhereClause = null;
+
+            foreach ( var target in targets )
+            {
+                var targetType = target.GetType();
+                if ( string.Equals( targetType.GetProperty( "TableName" ).GetValue( target ).ToString(), "AttributeValue", StringComparison.OrdinalIgnoreCase ) )
+                {
+                    attributeValueWhereClause = targetType.GetProperty( "SourceWhereClauseSql" ).GetValue( target ) as string;
+                    break;
+                }
+            }
+
+            Assert.IsNotNull( attributeValueWhereClause );
+            StringAssert.Contains( attributeValueWhereClause, LavaApprovalSourceClassifier.LavaWebhookTemplateAttributeGuid );
         }
 
         [DataTestMethod]

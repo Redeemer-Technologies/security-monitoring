@@ -53,7 +53,9 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 SummaryLava = alert.SummaryLava,
                 DateRange = IISLogDuckDbQuery.ToSlidingDateRangeBag(alert.DateRange.IfEmpty(IISLogDuckDbQuery.DefaultDateRange)),
                 NotificationEmails = alert.NotificationEmails,
-                EvaluationFrequencyMinutes = alert.EvaluationFrequencyMinutes < 1 ? 60 : alert.EvaluationFrequencyMinutes,
+                EvaluationFrequencyMinutes = alert.EvaluationFrequencyMinutes < 1
+                    ? ( alert.EvaluationMode == IISAlertEvaluationMode.RealTimeRule ? 1 : 60 )
+                    : alert.EvaluationFrequencyMinutes,
                 LastRunDateTime = alert.LastRunDateTime?.ToString("g"),
                 BlockIpAddress = alert.BlockIpAddress,
                 BlockIpAddressMinutes = alert.BlockIpAddressMinutes,

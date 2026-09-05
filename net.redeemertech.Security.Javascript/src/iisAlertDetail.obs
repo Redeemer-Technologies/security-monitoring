@@ -23,7 +23,7 @@
                         </dd>
                     </template>
                     <dt>Email Addresses</dt><dd>{{ alert.notificationEmails || '' }}</dd>
-                    <dt>{{ isRealtime ? 'Alert Cooldown' : 'Evaluate Every' }}</dt><dd>{{ alert.evaluationFrequencyMinutes }} minute(s)</dd>
+                    <dt>{{ isRealtime ? 'Notification Cooldown Period' : 'Evaluate Every' }}</dt><dd>{{ alert.evaluationFrequencyMinutes }} minute(s)</dd>
                     <dt v-if="isRealtime">Block Current Request</dt><dd v-if="isRealtime">{{ alert.blockRequest ? `${alert.blockResponseStatusCode || 403} ${alert.blockResponseMessage || ''}` : 'No' }}</dd>
                     <dt>Block IP Addresses</dt><dd>{{ alert.blockIpAddress ? `Yes, for ${alert.blockIpAddressMinutes || 60} minute(s)` : 'No' }}</dd>
                     <dt>Lock Out User Accounts</dt><dd>{{ alert.lockOutUserAccounts ? 'Yes' : 'No' }}</dd>
@@ -135,8 +135,8 @@
                 <h4>Notification</h4>
                 <TextBox v-model="alert.notificationEmails" label="Email Addresses" help="Comma-separated list of email addresses to notify when this alert trips." />
                 <NumberBox v-model="alert.evaluationFrequencyMinutes"
-                           :label="isRealtime ? 'Alert Cooldown Minutes' : 'Evaluate Every Minutes'"
-                           :help="isRealtime ? 'History and notifications run once per rule version during this interval; the next notification reports suppressed matches. Every matching request is blocked when enabled. Each distinct IP and account is enforced independently, with retries after failed enforcement.' : undefined"
+                           :label="isRealtime ? 'Notification Cooldown Period (Minutes)' : 'Evaluate Every Minutes'"
+                           :help="isRealtime ? 'Minutes to wait after writing history and sending email before doing those again for this rule. Request blocking and IP blocking are not delayed by this setting. Matches during the cooldown are counted and included on the next history row and notification.' : undefined"
                            :minimumValue="1"
                            rules="required" />
 
@@ -282,9 +282,20 @@
             .filter(message => !!message);
     });
 
-    watch(() => alert.value.evaluationMode, mode => {
+    watch(() => alert.value.evaluationMode, (mode, previousMode) => {
         if (mode === "RealTimeRule" && !(alert.value.conditions || []).length) {
             addCondition();
+        }
+
+        if (!previousMode || previousMode === mode) {
+            return;
+        }
+
+        if (mode === "RealTimeRule" && alert.value.evaluationFrequencyMinutes === 60) {
+            alert.value.evaluationFrequencyMinutes = 1;
+        }
+        else if (mode === "LogQuery" && alert.value.evaluationFrequencyMinutes === 1) {
+            alert.value.evaluationFrequencyMinutes = 60;
         }
     });
 

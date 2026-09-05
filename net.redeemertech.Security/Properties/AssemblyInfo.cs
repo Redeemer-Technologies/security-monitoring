@@ -31,3 +31,4 @@ using System.Runtime.InteropServices;
 //
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("17.0.0.4")]
+[assembly: InternalsVisibleTo("net.redeemertech.Security.Tests")]

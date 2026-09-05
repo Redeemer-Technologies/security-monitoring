@@ -186,7 +186,7 @@ namespace net.redeemertech.Security
                 var historyService = new IISAlertHistoryService( rockContext );
                 var now = RockDateTime.Now;
                 var alerts = alertService.Queryable()
-                    .Where( a => a.IsActive )
+                    .Where( a => a.IsActive && a.EvaluationMode == IISAlertEvaluationMode.LogQuery )
                     .OrderBy( a => a.Name )
                     .ToList();
 

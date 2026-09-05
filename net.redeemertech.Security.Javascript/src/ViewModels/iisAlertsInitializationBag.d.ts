@@ -1,5 +1,6 @@
 import { BlockBox } from "@Obsidian/ViewModels/Blocks/blockBox";
 import { SlidingDateRangeBag } from "@Obsidian/ViewModels/Controls/slidingDateRangeBag";
+import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
 import { IisAlertBag } from "./iisAlertBag";
 import { IisAlertHistoryListItemBag } from "./iisAlertHistoryListItemBag";
 import { IisBlockedIpBag } from "./iisBlockedIpBag";
@@ -14,4 +15,5 @@ export type IisAlertsInitializationBag = BlockBox & {
     histories?: IisAlertHistoryListItemBag[] | null;
     blockedIps?: IisBlockedIpBag[] | null;
     defaultDateRange?: SlidingDateRangeBag | null;
+    securityRoles?: ListItemBag[] | null;
 };

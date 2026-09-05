@@ -26,7 +26,6 @@ namespace net.redeemertech.Security.Model
         [DataMember]
         public bool IsActive { get; set; }
 
-        [Required]
         [DataMember]
         public string Query { get; set; }
 
@@ -54,6 +53,27 @@ namespace net.redeemertech.Security.Model
 
         [DataMember]
         public bool LockOutUserAccounts { get; set; }
+
+        [DataMember]
+        public IISAlertEvaluationMode EvaluationMode { get; set; }
+
+        [DataMember]
+        public IISRequestRuleStage RequestStage { get; set; }
+
+        [DataMember]
+        public IISRequestRuleConditionLogic ConditionLogic { get; set; }
+
+        [DataMember]
+        public string ConditionsJson { get; set; }
+
+        [DataMember]
+        public bool BlockRequest { get; set; }
+
+        [DataMember]
+        public int? BlockResponseStatusCode { get; set; }
+
+        [DataMember]
+        public string BlockResponseMessage { get; set; }
 
         public virtual List<IISAlertHistory> Histories { get; set; }
 

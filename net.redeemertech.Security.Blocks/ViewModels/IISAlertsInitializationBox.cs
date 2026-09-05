@@ -2,6 +2,7 @@ using net.redeemertech.Security.Model;
 using Rock;
 using Rock.Model;
 using Rock.ViewModels.Controls;
+using Rock.ViewModels.Utility;
 using System;
 using System.Collections.Generic;
 
@@ -18,5 +19,6 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public List<IISAlertHistoryListItemBag> Histories { get; set; }
         public List<IISBlockedIpBag> BlockedIps { get; set; }
         public SlidingDateRangeBag DefaultDateRange { get; set; }
+        public List<ListItemBag> SecurityRoles { get; set; }
     }
 }

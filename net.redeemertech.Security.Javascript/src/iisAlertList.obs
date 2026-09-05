@@ -3,10 +3,10 @@
         <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
 
         <Grid v-else
-              title="IIS Alerts"
+              title="IIS Alerts and Rules"
               :data="gridDataSource"
               keyField="idKey"
-              itemTerm="IIS Alert"
+              itemTerm="IIS Alert or Rule"
               tooltipField="name"
               stickyHeader
               :onAddItem="isEditable ? goToNewAlert : undefined"
@@ -17,10 +17,32 @@
                     filterValue="{{ row.name }} {{ row.description }}"
                     quickFilterValue="{{ row.name }} {{ row.description }}"
                     :filter="textValueFilter"
-                    width="45%">
+                    width="35%">
                 <template #format="{ row }">
                     <strong>{{ row.name }}</strong>
                     <div class="text-muted">{{ row.description }}</div>
+                </template>
+            </Column>
+
+            <Column name="evaluationMode"
+                    title="Type"
+                    field="evaluationMode"
+                    :filter="textValueFilter"
+                    visiblePriority="xs"
+                    width="15%">
+                <template #format="{ row }">
+                    {{ row.evaluationMode === "RealTimeRule" ? "Real-time Rule" : "Log Query" }}
+                </template>
+            </Column>
+
+            <Column name="requestStage"
+                    title="Stage"
+                    field="requestStage"
+                    :filter="textValueFilter"
+                    visiblePriority="sm"
+                    width="15%">
+                <template #format="{ row }">
+                    {{ row.evaluationMode === "RealTimeRule" ? formatStage(row.requestStage) : "Scheduled" }}
                 </template>
             </Column>
 
@@ -35,14 +57,14 @@
                           title="Frequency Minutes"
                           field="evaluationFrequencyMinutes"
                           visiblePriority="sm"
-                          width="15%" />
+                          width="10%" />
 
             <TextColumn name="lastRunDateTime"
                         title="Last Run"
                         field="lastRunDateTime"
                         :filter="textValueFilter"
                         visiblePriority="sm"
-                        width="20%" />
+                        width="15%" />
 
             <DeleteColumn v-if="isEditable" @click="deleteAlert" />
         </Grid>
@@ -94,5 +116,18 @@
         else {
             errorMessage.value = result.errorMessage || "Unable to delete alert.";
         }
+    }
+
+    function formatStage(stage: string): string {
+        if (stage === "PreAuthentication") {
+            return "Before Auth";
+        }
+        if (stage === "PostAuthentication") {
+            return "After Auth";
+        }
+        if (stage === "EndRequest") {
+            return "End Request";
+        }
+        return stage || "";
     }
 </script>

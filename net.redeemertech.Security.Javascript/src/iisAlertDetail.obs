@@ -2,20 +2,36 @@
     <div>
         <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
 
-        <Panel v-else :title="alert.name || 'IIS Alert Detail'">
+        <Panel v-else :title="alert.name || (isRealtime ? 'Real-time IIS Rule' : 'IIS Alert Detail')">
             <template v-if="!isEditMode">
                 <dl class="dl-horizontal">
                     <dt>Description</dt><dd>{{ alert.description || '' }}</dd>
+                    <dt>Type</dt><dd>{{ isRealtime ? 'Real-time request rule' : 'Historical log query' }}</dd>
                     <dt>Active</dt><dd>{{ alert.isActive ? 'Yes' : 'No' }}</dd>
+                    <template v-if="isRealtime">
+                        <dt>Processing Stage</dt><dd>{{ stageLabel(alert.requestStage) }}</dd>
+                        <dt>Condition Logic</dt><dd>{{ alert.conditionLogic === 'Any' ? 'Match any condition (OR)' : 'Match all conditions (AND)' }}</dd>
+                        <dt>Conditions</dt>
+                        <dd>
+                            <ol class="pl-3">
+                                <li v-for="(condition, index) in alert.conditions || []" :key="index">
+                                    {{ conditionLabel(condition) }}
+                                </li>
+                            </ol>
+                        </dd>
+                    </template>
                     <dt>Email Addresses</dt><dd>{{ alert.notificationEmails || '' }}</dd>
-                    <dt>Evaluate Every</dt><dd>{{ alert.evaluationFrequencyMinutes }} minute(s)</dd>
+                    <dt>{{ isRealtime ? 'Alert Cooldown' : 'Evaluate Every' }}</dt><dd>{{ alert.evaluationFrequencyMinutes }} minute(s)</dd>
+                    <dt v-if="isRealtime">Block Current Request</dt><dd v-if="isRealtime">{{ alert.blockRequest ? `${alert.blockResponseStatusCode || 403} ${alert.blockResponseMessage || ''}` : 'No' }}</dd>
                     <dt>Block IP Addresses</dt><dd>{{ alert.blockIpAddress ? `Yes, for ${alert.blockIpAddressMinutes || 60} minute(s)` : 'No' }}</dd>
                     <dt>Lock Out User Accounts</dt><dd>{{ alert.lockOutUserAccounts ? 'Yes' : 'No' }}</dd>
                     <dt>Last Run</dt><dd>{{ alert.lastRunDateTime || 'Never' }}</dd>
                 </dl>
 
-                <h4>Query</h4>
-                <pre class="well well-sm">{{ alert.query }}</pre>
+                <template v-if="!isRealtime">
+                    <h4>Query</h4>
+                    <pre class="well well-sm">{{ alert.query }}</pre>
+                </template>
 
                 <h4>Summary Lava</h4>
                 <pre class="well well-sm">{{ alert.summaryLava }}</pre>
@@ -27,22 +43,114 @@
                 <TextBox v-model="alert.name" label="Name" />
                 <TextBox v-model="alert.description" label="Description" textMode="multiline" :rows="3" />
                 <CheckBox v-model="alert.isActive" label="Active" />
+                <DropDownList v-model="alert.evaluationMode"
+                              label="Type"
+                              :items="evaluationModeItems"
+                              :showBlankItem="false" />
 
-                <h4>Query</h4>
-                <CodeEditor v-model="alert.query" label="SQL Query" help="Use [[logs]] in the FROM clause as the IIS log parquet source." mode="sql" :rows="12" />
-                <SlidingDateRangePicker v-model="alert.dateRange" label="Date Range" help="Only parquet files whose filename date stamp falls within this range will be included." previewLocation="Right" />
+                <template v-if="!isRealtime">
+                    <h4>Historical Query</h4>
+                    <CodeEditor v-model="alert.query" label="SQL Query" help="Use [[logs]] in the FROM clause as the IIS log parquet source." mode="sql" :rows="12" />
+                    <SlidingDateRangePicker v-model="alert.dateRange" label="Date Range" help="Only parquet files whose filename date stamp falls within this range will be included." previewLocation="Right" />
+                </template>
+
+                <template v-else>
+                    <h4>Request Processing</h4>
+                    <DropDownList v-model="alert.requestStage"
+                                  label="Processing Stage"
+                                  help="Before authentication has no user principal. After authentication runs after Forms authentication for web requests and after Rock API-key, JWT, or OIDC authentication for API requests. End of request also includes response fields, but cannot block the completed current request."
+                                  :items="requestStageItems"
+                                  :showBlankItem="false" />
+                    <DropDownList v-model="alert.conditionLogic"
+                                  label="Condition Logic"
+                                  :items="conditionLogicItems"
+                                  :showBlankItem="false" />
+
+                    <h4>Conditions</h4>
+                    <NotificationBox v-if="!(alert.conditions || []).length" :alertType="AlertType.Info">
+                        Add at least one condition. Only fields available at the selected processing stage are shown.
+                    </NotificationBox>
+                    <NotificationBox v-if="incompatibleConditionMessages.length" :alertType="AlertType.Warning">
+                        <div v-for="message in incompatibleConditionMessages" :key="message">{{ message }}</div>
+                        Change the highlighted conditions or restore a processing stage where those fields are available before saving.
+                    </NotificationBox>
+
+                    <div v-for="(condition, index) in alert.conditions || []" :key="index" class="well well-sm">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <DropDownList v-model="condition.field"
+                                              label="Field"
+                                              :items="fieldItemsFor(condition)"
+                                              @update:modelValue="onConditionFieldChanged(condition, $event)"
+                                              :showBlankItem="false" />
+                            </div>
+                            <div v-if="condition.field === 'RequestHeader' || condition.field === 'ResponseHeader'" class="col-md-3">
+                                <TextBox v-model="condition.headerName" label="Header Name" placeholder="X-Forwarded-For" />
+                            </div>
+                            <div class="col-md-3">
+                                <DropDownList v-model="condition.operator"
+                                              label="Operator"
+                                              :items="operatorItemsFor(condition)"
+                                              :showBlankItem="true"
+                                              blankValue="" />
+                            </div>
+                            <div v-if="conditionNeedsValue(condition)" class="col-md-3">
+                                <DropDownList v-if="condition.field === 'SecurityRole'"
+                                              v-model="condition.value"
+                                              label="Security Role"
+                                              :items="securityRoleItems"
+                                              :showBlankItem="true"
+                                              blankValue="" />
+                                <TextBox v-else
+                                         v-model="condition.value"
+                                         :label="condition.operator === 'Regex' ? 'Regular Expression' : 'Value'"
+                                         :help="condition.operator === 'Regex' ? 'Regular expressions use a 5 ms timeout and accept inputs up to 16,384 characters. Longer inputs and timed-out matches do not match the condition. Other operators compare the complete input.' : undefined" />
+                            </div>
+                        </div>
+                        <CheckBox v-if="conditionUsesTextComparison(condition)"
+                                  v-model="condition.ignoreCase"
+                                  label="Ignore Case" />
+                        <RockButton btnType="danger" @click="removeCondition(index)">Remove Condition</RockButton>
+                    </div>
+
+                    <RockButton @click="addCondition">Add Condition</RockButton>
+
+                    <NotificationBox v-if="alert.requestStage === 'EndRequest'" :alertType="AlertType.Info" class="mt-3">
+                        Response Bytes is measured by a managed response filter and can be enabled immediately. It represents bytes written by the Rock application, which may differ from compressed bytes sent on the wire. No IIS feature or server restart is required.
+                    </NotificationBox>
+                </template>
 
                 <h4>Summary</h4>
-                <CodeEditor v-model="alert.summaryLava" label="Summary Lava" help="Formats the alert history summary. The results merge field contains the query rows. Lava commands are disabled when this is resolved." mode="lava" :rows="8" />
+                <CodeEditor v-model="alert.summaryLava"
+                            label="Summary Lava"
+                            :help="isRealtime ? 'Formats the alert history summary. The Request merge field contains the captured request and response values.' : 'Formats the alert history summary. The results merge field contains the query rows. Lava commands are disabled when this is resolved.'"
+                            mode="lava"
+                            :rows="8" />
 
                 <h4>Notification</h4>
                 <TextBox v-model="alert.notificationEmails" label="Email Addresses" help="Comma-separated list of email addresses to notify when this alert trips." />
-                <NumberBox v-model="alert.evaluationFrequencyMinutes" label="Evaluate Every Minutes" :minimumValue="1" />
+                <NumberBox v-model="alert.evaluationFrequencyMinutes"
+                           :label="isRealtime ? 'Alert Cooldown Minutes' : 'Evaluate Every Minutes'"
+                           :help="isRealtime ? 'History and notifications run once per rule version during this interval; the next notification reports suppressed matches. Every matching request is blocked when enabled. Each distinct IP and account is enforced independently, with retries after failed enforcement.' : undefined"
+                           :minimumValue="1" />
 
                 <h4>Response Actions</h4>
-                <CheckBox v-model="alert.blockIpAddress" label="Block IP Addresses" help="When enabled, the alert query must return a BlockedIpAddress column. The c-ip column is also accepted." />
+                <CheckBox v-if="isRealtime && alert.requestStage !== 'EndRequest'"
+                          v-model="alert.blockRequest"
+                          label="Block Current Request"
+                          help="Stops the request before its handler executes and returns the configured response." />
+                <template v-if="isRealtime && alert.requestStage !== 'EndRequest' && alert.blockRequest">
+                    <NumberBox v-model="alert.blockResponseStatusCode" label="Response Status Code" :minimumValue="400" :maximumValue="599" />
+                    <TextBox v-model="alert.blockResponseMessage" label="Response Message" textMode="multiline" :rows="3" />
+                </template>
+                <CheckBox v-model="alert.blockIpAddress"
+                          label="Block IP Addresses"
+                          :help="isRealtime ? 'Adds the matching request client IP to the existing block list. Subsequent requests are rejected at BeginRequest.' : 'When enabled, the alert query must return a BlockedIpAddress column. The c-ip column is also accepted.'" />
                 <NumberBox v-if="alert.blockIpAddress" v-model="alert.blockIpAddressMinutes" label="Block IP for Minutes" :minimumValue="1" />
-                <CheckBox v-model="alert.lockOutUserAccounts" label="Lock Out User Accounts" help="When enabled, the alert query must return a UserLoginId, UserName, or cs-username column." />
+                <CheckBox v-if="!isRealtime || alert.requestStage !== 'PreAuthentication'"
+                          v-model="alert.lockOutUserAccounts"
+                          label="Lock Out User Accounts"
+                          :help="isRealtime ? 'Locks the authenticated username captured by the rule.' : 'When enabled, the alert query must return a UserLoginId, UserName, or cs-username column.'" />
 
                 <RockButton btnType="primary" :disabled="isSaving" @click="save">Save</RockButton>
                 <RockButton v-if="savedAlert" :disabled="isSaving" @click="cancel">Cancel</RockButton>
@@ -52,9 +160,10 @@
 </template>
 
 <script setup lang="ts">
-    import { ref } from "vue";
+    import { computed, ref, watch } from "vue";
     import CheckBox from "@Obsidian/Controls/checkBox.obs";
     import CodeEditor from "@Obsidian/Controls/codeEditor.obs";
+    import DropDownList from "@Obsidian/Controls/dropDownList.obs";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
     import NumberBox from "@Obsidian/Controls/numberBox.obs";
     import Panel from "@Obsidian/Controls/panel.obs";
@@ -63,18 +172,206 @@
     import TextBox from "@Obsidian/Controls/textBox.obs";
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
+    import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
     import { IisAlertBag } from "./ViewModels/iisAlertBag";
+    import { IisAlertConditionBag } from "./ViewModels/iisAlertConditionBag";
     import { IisAlertsInitializationBag } from "./ViewModels/iisAlertsInitializationBag";
 
     const config = useConfigurationValues<IisAlertsInitializationBag>();
     const invokeBlockAction = useInvokeBlockAction();
-    const alert = ref<IisAlertBag>(config.alert || { isActive: true, evaluationFrequencyMinutes: 60, dateRange: config.defaultDateRange, blockIpAddress: false, blockIpAddressMinutes: 60, lockOutUserAccounts: false });
-    const savedAlert = ref<IisAlertBag | null>(alert.value.idKey ? { ...alert.value } : null);
+    const alert = ref<IisAlertBag>(config.alert || createNewAlert());
+    normalizeAlert();
+    const savedAlert = ref<IisAlertBag | null>(alert.value.idKey ? cloneAlert(alert.value) : null);
     const errorMessage = ref(config.errorMessage ?? "");
     const isEditable = config.isEditable;
     const isEditMode = ref(isEditable && !alert.value.idKey);
     const isSaving = ref(false);
     const alertPageParameter = "IISAlertId";
+
+    const evaluationModeItems: ListItemBag[] = [
+        { text: "Historical Log Query", value: "LogQuery" },
+        { text: "Real-time Request Rule", value: "RealTimeRule" }
+    ];
+    const requestStageItems: ListItemBag[] = [
+        { text: "Before Authentication", value: "PreAuthentication" },
+        { text: "After Authentication", value: "PostAuthentication" },
+        { text: "End of Request", value: "EndRequest" }
+    ];
+    const conditionLogicItems: ListItemBag[] = [
+        { text: "All conditions (AND)", value: "All" },
+        { text: "Any condition (OR)", value: "Any" }
+    ];
+    const textOperatorItems: ListItemBag[] = [
+        { text: "Equals", value: "Equals" },
+        { text: "Does Not Equal", value: "NotEquals" },
+        { text: "Contains", value: "Contains" },
+        { text: "Starts With", value: "StartsWith" },
+        { text: "Ends With", value: "EndsWith" },
+        { text: "Regular Expression", value: "Regex" },
+        { text: "Exists", value: "Exists" },
+        { text: "Does Not Exist", value: "DoesNotExist" },
+        { text: "Greater Than", value: "GreaterThan" },
+        { text: "Greater Than or Equal", value: "GreaterThanOrEqual" },
+        { text: "Less Than", value: "LessThan" },
+        { text: "Less Than or Equal", value: "LessThanOrEqual" }
+    ];
+    const securityRoleOperatorItems: ListItemBag[] = [
+        { text: "Is Member Of", value: "IsMemberOf" },
+        { text: "Is Not Member Of", value: "IsNotMemberOf" }
+    ];
+    const preAuthenticationFields: ListItemBag[] = [
+        { text: "Client IP", value: "ClientIp" },
+        { text: "HTTP Method", value: "HttpMethod" },
+        { text: "Host", value: "Host" },
+        { text: "Path", value: "Path" },
+        { text: "Raw URL", value: "RawUrl" },
+        { text: "Query String", value: "QueryString" },
+        { text: "User Agent", value: "UserAgent" },
+        { text: "Referrer", value: "Referrer" },
+        { text: "Request Content Type", value: "RequestContentType" },
+        { text: "Request Content Length", value: "RequestContentLength" },
+        { text: "Request Header", value: "RequestHeader" }
+    ];
+    const authenticationFields: ListItemBag[] = [
+        { text: "Is Authenticated", value: "IsAuthenticated" },
+        { text: "Username", value: "UserName" },
+        { text: "Security Role", value: "SecurityRole" }
+    ];
+    const responseFields: ListItemBag[] = [
+        { text: "Response Status Code", value: "ResponseStatusCode" },
+        { text: "Response Substatus Code", value: "ResponseSubStatusCode" },
+        { text: "Response Content Type", value: "ResponseContentType" },
+        { text: "Response Header", value: "ResponseHeader" },
+        { text: "Response Bytes", value: "ResponseBytes" },
+        { text: "Duration Milliseconds", value: "DurationMilliseconds" }
+    ];
+
+    const isRealtime = computed((): boolean => alert.value.evaluationMode === "RealTimeRule");
+    const securityRoleItems = config.securityRoles || [];
+    const availableFieldItems = computed((): ListItemBag[] => {
+        const fields = [...preAuthenticationFields];
+        if (alert.value.requestStage !== "PreAuthentication") {
+            fields.push(...authenticationFields);
+        }
+        if (alert.value.requestStage === "EndRequest") {
+            fields.push(...responseFields);
+        }
+        return fields;
+    });
+    const incompatibleConditionMessages = computed((): string[] => {
+        const validFields = new Set(availableFieldItems.value.map(item => item.value));
+        return (alert.value.conditions || [])
+            .map((condition, index) => !condition.field || validFields.has(condition.field)
+                ? ""
+                : `Condition ${index + 1} uses ${fieldLabel(condition.field)}, which is unavailable at ${stageLabel(alert.value.requestStage)}.`)
+            .filter(message => !!message);
+    });
+
+    watch(() => alert.value.evaluationMode, mode => {
+        if (mode === "RealTimeRule" && !(alert.value.conditions || []).length) {
+            addCondition();
+        }
+    });
+
+    watch(() => alert.value.requestStage, stage => {
+        if (stage === "EndRequest") {
+            alert.value.blockRequest = false;
+        }
+        if (stage === "PreAuthentication") {
+            alert.value.lockOutUserAccounts = false;
+        }
+
+    });
+
+    function createNewAlert(): IisAlertBag {
+        return {
+            isActive: true,
+            evaluationMode: "LogQuery",
+            requestStage: "PreAuthentication",
+            conditionLogic: "All",
+            conditions: [],
+            evaluationFrequencyMinutes: 60,
+            dateRange: config.defaultDateRange,
+            blockRequest: false,
+            blockResponseStatusCode: 403,
+            blockIpAddress: false,
+            blockIpAddressMinutes: 60,
+            lockOutUserAccounts: false
+        };
+    }
+
+    function normalizeAlert(): void {
+        alert.value.evaluationMode ||= "LogQuery";
+        alert.value.requestStage ||= "PreAuthentication";
+        alert.value.conditionLogic ||= "All";
+        alert.value.conditions ||= [];
+        alert.value.blockRequest ||= false;
+        alert.value.blockResponseStatusCode ||= 403;
+    }
+
+    function cloneAlert(value: IisAlertBag): IisAlertBag {
+        return JSON.parse(JSON.stringify(value)) as IisAlertBag;
+    }
+
+    function addCondition(): void {
+        alert.value.conditions ||= [];
+        alert.value.conditions.push({ field: "Path", operator: "", value: "", ignoreCase: true });
+    }
+
+    function removeCondition(index: number): void {
+        alert.value.conditions?.splice(index, 1);
+    }
+
+    function conditionNeedsValue(condition: IisAlertConditionBag): boolean {
+        return condition.operator !== "Exists" && condition.operator !== "DoesNotExist";
+    }
+
+    function operatorItemsFor(condition: IisAlertConditionBag): ListItemBag[] {
+        return condition.field === "SecurityRole" ? securityRoleOperatorItems : textOperatorItems;
+    }
+
+    function fieldItemsFor(condition: IisAlertConditionBag): ListItemBag[] {
+        if (!condition.field || availableFieldItems.value.some(item => item.value === condition.field)) {
+            return availableFieldItems.value;
+        }
+
+        return [
+            ...availableFieldItems.value,
+            { text: `${fieldLabel(condition.field)} (Unavailable at this stage)`, value: condition.field }
+        ];
+    }
+
+    function onConditionFieldChanged(condition: IisAlertConditionBag, value: string | string[]): void {
+        condition.field = Array.isArray(value) ? value[0] : value;
+        const operators = operatorItemsFor(condition);
+        if (!operators.some(item => item.value === condition.operator)) {
+            condition.operator = "";
+            condition.value = "";
+        }
+        condition.ignoreCase = condition.field !== "SecurityRole" && condition.ignoreCase;
+    }
+
+    function conditionUsesTextComparison(condition: IisAlertConditionBag): boolean {
+        return !["Exists", "DoesNotExist", "GreaterThan", "GreaterThanOrEqual", "LessThan", "LessThanOrEqual", "IsMemberOf", "IsNotMemberOf"].includes(condition.operator || "");
+    }
+
+    function stageLabel(stage: string | null | undefined): string {
+        return requestStageItems.find(item => item.value === stage)?.text || stage || "";
+    }
+
+    function fieldLabel(field: string | null | undefined): string {
+        return [...preAuthenticationFields, ...authenticationFields, ...responseFields].find(item => item.value === field)?.text || field || "Field";
+    }
+
+    function conditionLabel(condition: IisAlertConditionBag): string {
+        const field = fieldLabel(condition.field);
+        const target = condition.field === "RequestHeader" || condition.field === "ResponseHeader" ? `${field} (${condition.headerName || "unnamed"})` : field;
+        const operator = [...textOperatorItems, ...securityRoleOperatorItems].find(item => item.value === condition.operator)?.text || condition.operator || "operator";
+        const value = condition.field === "SecurityRole"
+            ? securityRoleItems.find(item => item.value === condition.value)?.text || condition.value || ""
+            : condition.value || "";
+        return conditionNeedsValue(condition) ? `${target} ${operator} ${value}` : `${target} ${operator}`;
+    }
 
     function edit(): void {
         isEditMode.value = true;
@@ -82,20 +379,23 @@
 
     function cancel(): void {
         if (savedAlert.value) {
-            alert.value = { ...savedAlert.value };
+            alert.value = cloneAlert(savedAlert.value);
+            normalizeAlert();
             isEditMode.value = false;
         }
     }
 
     async function save(): Promise<void> {
         const isNewAlert = !alert.value.idKey;
+        errorMessage.value = "";
         isSaving.value = true;
         const result = await invokeBlockAction<IisAlertBag>("SaveAlert", { bag: alert.value });
         isSaving.value = false;
 
         if (result.isSuccess && result.data) {
             alert.value = result.data;
-            savedAlert.value = { ...result.data };
+            normalizeAlert();
+            savedAlert.value = cloneAlert(result.data);
             isEditMode.value = false;
 
             if (isNewAlert && result.data.idKey) {

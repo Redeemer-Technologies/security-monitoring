@@ -59,6 +59,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
 
             service.Delete( alert );
             RockContext.SaveChanges();
+            IISAlertRuleCache.Reload();
             return ActionOk();
         }
 

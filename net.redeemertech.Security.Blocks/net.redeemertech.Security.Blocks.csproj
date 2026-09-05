@@ -97,6 +97,7 @@
     <Compile Include="Blocks\LavaApprovalList.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ViewModels\IISAlertBag.cs" />
+    <Compile Include="ViewModels\IISAlertConditionBag.cs" />
     <Compile Include="ViewModels\IISBlockedIpBag.cs" />
     <Compile Include="ViewModels\IISAlertHistoryDetailBox.cs" />
     <Compile Include="ViewModels\IISAlertHistoryBag.cs" />

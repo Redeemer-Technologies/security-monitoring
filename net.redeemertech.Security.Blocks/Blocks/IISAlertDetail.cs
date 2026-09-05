@@ -3,8 +3,15 @@ using net.redeemertech.Security.Model;
 
 using Rock;
 using Rock.Blocks;
+using Rock.Model;
+using Rock.ViewModels.Utility;
+using Rock.Web.Cache;
 
 using System.ComponentModel;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web.Script.Serialization;
 
 namespace net.redeemertech.Security.Blocks.Blocks
 {
@@ -37,7 +44,8 @@ namespace net.redeemertech.Security.Blocks.Blocks
             {
                 IsEditable = alert.IsAuthorized(Rock.Security.Authorization.EDIT, RequestContext.CurrentPerson),
                 Alert = IISAlertBag.FromEntity(alert),
-                DefaultDateRange = IISLogDuckDbQuery.ToSlidingDateRangeBag(IISLogDuckDbQuery.DefaultDateRange)
+                DefaultDateRange = IISLogDuckDbQuery.ToSlidingDateRangeBag(IISLogDuckDbQuery.DefaultDateRange),
+                SecurityRoles = GetSecurityRoles()
             };
         }
 
@@ -56,10 +64,29 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 return ActionForbidden("Not authorized to edit IIS alerts.");
             }
 
+            IISAlertEvaluationMode evaluationMode;
+            IISRequestRuleStage requestStage;
+            IISRequestRuleConditionLogic conditionLogic;
+            if ( !Enum.TryParse( bag.EvaluationMode.IfEmpty( IISAlertEvaluationMode.LogQuery.ToString() ), true, out evaluationMode )
+                || !Enum.TryParse( bag.RequestStage.IfEmpty( IISRequestRuleStage.PreAuthentication.ToString() ), true, out requestStage )
+                || !Enum.TryParse( bag.ConditionLogic.IfEmpty( IISRequestRuleConditionLogic.All.ToString() ), true, out conditionLogic )
+                || !Enum.IsDefined( typeof( IISAlertEvaluationMode ), evaluationMode )
+                || !Enum.IsDefined( typeof( IISRequestRuleStage ), requestStage )
+                || !Enum.IsDefined( typeof( IISRequestRuleConditionLogic ), conditionLogic ) )
+            {
+                return ActionBadRequest( "The rule type, processing stage, or condition logic is invalid." );
+            }
+
+            var conditions = ( bag.Conditions ?? new List<IISAlertConditionBag>() ).Select( condition => condition?.ToEntity() ).ToList();
+
             alert.Name = bag.Name?.Trim();
             alert.Description = bag.Description;
             alert.IsActive = bag.IsActive;
-            alert.Query = bag.Query;
+            alert.EvaluationMode = evaluationMode;
+            alert.RequestStage = requestStage;
+            alert.ConditionLogic = conditionLogic;
+            alert.ConditionsJson = new JavaScriptSerializer().Serialize( conditions );
+            alert.Query = bag.Query.IfEmpty( evaluationMode == IISAlertEvaluationMode.LogQuery ? null : string.Empty );
             alert.SummaryLava = bag.SummaryLava;
             alert.DateRange = IISLogDuckDbQuery.ToDelimitedDateRange(bag.DateRange).IfEmpty(IISLogDuckDbQuery.DefaultDateRange);
             alert.NotificationEmails = bag.NotificationEmails;
@@ -67,9 +94,47 @@ namespace net.redeemertech.Security.Blocks.Blocks
             alert.BlockIpAddress = bag.BlockIpAddress;
             alert.BlockIpAddressMinutes = bag.BlockIpAddress ? System.Math.Max( 1, bag.BlockIpAddressMinutes ?? 60 ) : ( int? ) null;
             alert.LockOutUserAccounts = bag.LockOutUserAccounts;
-            if (alert.Name.IsNullOrWhiteSpace() || alert.Query.IsNullOrWhiteSpace())
+            alert.BlockRequest = evaluationMode == IISAlertEvaluationMode.RealTimeRule && requestStage != IISRequestRuleStage.EndRequest && bag.BlockRequest;
+            alert.BlockResponseStatusCode = alert.BlockRequest ? bag.BlockResponseStatusCode ?? 403 : ( int? ) null;
+            alert.BlockResponseMessage = alert.BlockRequest ? bag.BlockResponseMessage : null;
+
+            if ( alert.Name.IsNullOrWhiteSpace() )
             {
-                return ActionBadRequest("Name and SQL query are required.");
+                return ActionBadRequest( "Name is required." );
+            }
+
+            if ( evaluationMode == IISAlertEvaluationMode.LogQuery && alert.Query.IsNullOrWhiteSpace() )
+            {
+                return ActionBadRequest( "A SQL query is required for historical log alerts." );
+            }
+
+            if ( evaluationMode == IISAlertEvaluationMode.RealTimeRule )
+            {
+                List<IISRequestRuleConditionMatcher> conditionMatchers;
+                List<string> validationErrors;
+                if ( !IISRequestRuleCompiler.TryCompile( requestStage, conditionLogic, conditions, out conditionMatchers, out validationErrors ) )
+                {
+                    return ActionBadRequest( string.Join( " ", validationErrors ) );
+                }
+
+                foreach ( var condition in conditions.Where( condition => condition != null ) )
+                {
+                    if ( string.Equals( condition.Field, IISRequestRuleField.SecurityRole, StringComparison.OrdinalIgnoreCase )
+                        && RoleCache.Get( condition.Value.AsGuid() ) == null )
+                    {
+                        return ActionBadRequest( "The selected security role does not exist or is inactive." );
+                    }
+                }
+
+                if ( alert.BlockRequest && ( alert.BlockResponseStatusCode < 400 || alert.BlockResponseStatusCode > 599 ) )
+                {
+                    return ActionBadRequest( "The blocked-request response code must be between 400 and 599." );
+                }
+
+                if ( requestStage == IISRequestRuleStage.PreAuthentication )
+                {
+                    alert.LockOutUserAccounts = false;
+                }
             }
 
             if (alert.Id == 0)
@@ -78,6 +143,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
             }
 
             RockContext.SaveChanges();
+            IISAlertRuleCache.Reload();
             return ActionOk( IISAlertBag.FromEntity( alert ) );
         }
 
@@ -89,7 +155,12 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 SummaryLava = DefaultSummaryLava,
                 DateRange = IISLogDuckDbQuery.DefaultDateRange,
                 EvaluationFrequencyMinutes = 60,
-                BlockIpAddressMinutes = 60
+                BlockIpAddressMinutes = 60,
+                EvaluationMode = IISAlertEvaluationMode.LogQuery,
+                RequestStage = IISRequestRuleStage.PreAuthentication,
+                ConditionLogic = IISRequestRuleConditionLogic.All,
+                ConditionsJson = "[]",
+                BlockResponseStatusCode = 403
             };
         }
 
@@ -97,6 +168,26 @@ namespace net.redeemertech.Security.Blocks.Blocks
         {
             var idKey = PageParameter( "IISAlertId" );
             return idKey.IsNullOrWhiteSpace() || idKey == "0" ? GetNewAlert() : new IISAlertService( RockContext ).Get( idKey, !PageCache.Layout.Site.DisablePredictableIds );
+        }
+
+        private List<ListItemBag> GetSecurityRoles()
+        {
+            var securityRoleGroupTypeId = GroupTypeCache.GetSecurityRoleGroupType()?.Id ?? 0;
+            return new GroupService( RockContext ).Queryable()
+                .Where( group => group.IsActive && ( group.IsSecurityRole || group.GroupTypeId == securityRoleGroupTypeId ) )
+                .OrderBy( group => group.Name )
+                .Select( group => new
+                {
+                    group.Name,
+                    group.Guid
+                } )
+                .ToList()
+                .Select( group => new ListItemBag
+                {
+                    Text = group.Name,
+                    Value = group.Guid.ToString()
+                } )
+                .ToList();
         }
     }
 }

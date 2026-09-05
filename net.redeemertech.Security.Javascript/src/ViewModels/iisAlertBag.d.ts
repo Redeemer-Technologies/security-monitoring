@@ -1,4 +1,5 @@
 import { SlidingDateRangeBag } from "@Obsidian/ViewModels/Controls/slidingDateRangeBag";
+import { IisAlertConditionBag } from "./iisAlertConditionBag";
 
 export type IisAlertBag = {
     idKey?: string | null;
@@ -14,4 +15,11 @@ export type IisAlertBag = {
     blockIpAddress: boolean;
     blockIpAddressMinutes?: number | null;
     lockOutUserAccounts: boolean;
+    evaluationMode: string;
+    requestStage: string;
+    conditionLogic: string;
+    conditions?: IisAlertConditionBag[] | null;
+    blockRequest: boolean;
+    blockResponseStatusCode?: number | null;
+    blockResponseMessage?: string | null;
 };

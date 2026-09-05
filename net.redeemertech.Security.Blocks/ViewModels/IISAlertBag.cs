@@ -2,6 +2,10 @@ using net.redeemertech.Security.Model;
 using Rock;
 using Rock.ViewModels.Controls;
 
+using System.Collections.Generic;
+using System.Linq;
+using System.Web.Script.Serialization;
+
 namespace net.redeemertech.Security.Blocks.ViewModels
 {
     public class IISAlertBag
@@ -19,9 +23,26 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public bool BlockIpAddress { get; set; }
         public int? BlockIpAddressMinutes { get; set; }
         public bool LockOutUserAccounts { get; set; }
+        public string EvaluationMode { get; set; }
+        public string RequestStage { get; set; }
+        public string ConditionLogic { get; set; }
+        public List<IISAlertConditionBag> Conditions { get; set; }
+        public bool BlockRequest { get; set; }
+        public int? BlockResponseStatusCode { get; set; }
+        public string BlockResponseMessage { get; set; }
 
         public static IISAlertBag FromEntity(IISAlert alert)
         {
+            var conditions = new List<IISRequestRuleCondition>();
+            try
+            {
+                conditions = new JavaScriptSerializer().Deserialize<List<IISRequestRuleCondition>>( alert.ConditionsJson.IfEmpty( "[]" ) ) ?? conditions;
+            }
+            catch
+            {
+                // Invalid saved JSON is shown as an empty condition list so it can be corrected in the editor.
+            }
+
             return new IISAlertBag
             {
                 IdKey = alert.Id == 0 ? null : alert.IdKey,
@@ -36,7 +57,14 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                 LastRunDateTime = alert.LastRunDateTime?.ToString("g"),
                 BlockIpAddress = alert.BlockIpAddress,
                 BlockIpAddressMinutes = alert.BlockIpAddressMinutes,
-                LockOutUserAccounts = alert.LockOutUserAccounts
+                LockOutUserAccounts = alert.LockOutUserAccounts,
+                EvaluationMode = alert.EvaluationMode.ToString(),
+                RequestStage = alert.RequestStage.ToString(),
+                ConditionLogic = alert.ConditionLogic.ToString(),
+                Conditions = conditions.Select( IISAlertConditionBag.FromEntity ).ToList(),
+                BlockRequest = alert.BlockRequest,
+                BlockResponseStatusCode = alert.BlockResponseStatusCode,
+                BlockResponseMessage = alert.BlockResponseMessage
             };
         }
     }

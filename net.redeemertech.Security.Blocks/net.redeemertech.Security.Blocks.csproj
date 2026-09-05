@@ -85,6 +85,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Blocks\RestActionSecurityList.cs" />
+    <Compile Include="Blocks\RestActionSecurityPolicy.cs" />
     <Compile Include="Blocks\RestActionRequestCountMatcher.cs" />
     <Compile Include="Blocks\RockUiRestActionCatalog.cs" />
     <Compile Include="Blocks\RestControllerSecurityList.cs" />

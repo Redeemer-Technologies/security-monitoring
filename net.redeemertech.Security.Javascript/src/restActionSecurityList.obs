@@ -1,15 +1,19 @@
 <template>
     <div>
         <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+        <NotificationBox v-if="actionMessage" :alertType="actionAlertType">{{ actionMessage }}</NotificationBox>
 
-        <Grid v-else
+        <Grid v-if="!errorMessage"
               title="REST Action Security"
               :data="gridDataSource"
+              :customActions="gridActions"
               keyField="idKey"
               :entityTypeGuid="config.restActionEntityTypeGuid || undefined"
               itemTerm="REST Action"
               tooltipField="apiId"
               stickyHeader>
+            <SelectColumn />
+
             <Column name="action"
                     title="Action"
                     sortValue="{{ row.method }} {{ row.path }}"
@@ -89,9 +93,9 @@
                     width="12%">
                 <template #format="{ row }">
                     <span class="label"
-                          :class="row.isSecured ? 'label-success' : 'label-danger'"
+                          :class="!row.isSecurable ? 'label-default' : row.isSecured ? 'label-success' : 'label-danger'"
                           :title="getStatusTitle(row)">
-                        {{ row.isSecured ? "Secured" : "Insecure" }}
+                        {{ row.securityStatus }}
                     </span>
                 </template>
 
@@ -100,17 +104,29 @@
                 </template>
             </Column>
 
-            <SecurityColumn itemTitle="apiId" />
+            <Column name="__security" headerClass="grid-columncommand" itemClass="grid-columncommand" width="52px">
+                <template #format="{ row }">
+                    <button v-if="row.isSecurable"
+                            class="btn btn-security btn-sm"
+                            title="Secure"
+                            :disabled="row.isSecurityDisabled || isSecuring"
+                            @click.stop.prevent="openSecurity(row)">
+                        <i class="fa fa-lock"></i>
+                    </button>
+                </template>
+            </Column>
         </Grid>
     </div>
 </template>
 
 <script setup lang="ts">
-    import { ref } from "vue";
-    import Grid, { BooleanColumn, Column, NumberSkeletonCell, SecurityColumn, TextSkeletonCell, booleanValueFilter, textValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
+    import { computed, ref } from "vue";
+    import Grid, { BooleanColumn, Column, NumberSkeletonCell, SelectColumn, TextSkeletonCell, booleanValueFilter, textValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
+    import { showSecurity } from "@Obsidian/Utility/dialogs";
+    import { GridAction, IGridState } from "@Obsidian/Types/Controls/grid";
     import { GridDataBag } from "@Obsidian/ViewModels/Core/Grid/gridDataBag";
     import { RestActionSecurityBag } from "./ViewModels/restActionSecurityBag";
     import { RestActionSecurityInitializationBag } from "./ViewModels/restActionSecurityInitializationBag";
@@ -119,6 +135,57 @@
     const invokeBlockAction = useInvokeBlockAction();
     const errorMessage = ref(config.errorMessage ?? "");
     const gridDataSource = ref<Promise<GridDataBag>>();
+    const isSecuring = ref(false);
+    const actionMessage = ref("");
+    const actionAlertType = ref(AlertType.Info);
+    const gridActions = computed((): GridAction[] => [{
+        title: "Secure All",
+        tooltip: "Secure selected insecure endpoints; skip secured and insecurable endpoints",
+        iconCssClass: "fa fa-lock",
+        disabled: isSecuring.value,
+        handler: secureSelectedRows
+    }]);
+
+    async function secureSelectedRows(grid: IGridState): Promise<void> {
+        if (isSecuring.value) {
+            return;
+        }
+
+        const idKeys = grid.selectedKeys.filter(key => !!key);
+        actionMessage.value = "";
+        actionAlertType.value = AlertType.Warning;
+        if (!idKeys.length) {
+            actionMessage.value = "Select one or more REST actions to secure.";
+            return;
+        }
+
+        isSecuring.value = true;
+        try {
+            const result = await invokeBlockAction<{ securedCount: number; skippedCount: number }>("SecureAll", { idKeys });
+            if (!result.isSuccess || !result.data) {
+                actionMessage.value = result.errorMessage || "Unable to secure the selected REST actions.";
+                return;
+            }
+
+            actionAlertType.value = AlertType.Success;
+            actionMessage.value = `Secured ${result.data.securedCount} endpoint(s). Skipped ${result.data.skippedCount} already secured or insecurable endpoint(s).`;
+            gridDataSource.value = loadActions();
+            await gridDataSource.value;
+        }
+        catch (error) {
+            actionAlertType.value = AlertType.Warning;
+            actionMessage.value = error instanceof Error ? error.message : "Unable to secure or refresh the selected REST actions.";
+        }
+        finally {
+            isSecuring.value = false;
+        }
+    }
+
+    function openSecurity(row: RestActionSecurityBag): void {
+        if (row.isSecurable && !row.isSecurityDisabled && config.restActionEntityTypeGuid) {
+            showSecurity(config.restActionEntityTypeGuid, row.idKey, row.apiId);
+        }
+    }
 
     async function loadActions(): Promise<GridDataBag> {
         const result = await invokeBlockAction<RestActionSecurityBag[]>("GetActions");
@@ -135,6 +202,10 @@
     }
 
     function getStatusTitle(row: RestActionSecurityBag): string {
+        if (!row.isSecurable) {
+            return "This endpoint has no [Secured] marker. Use the IIS rules function to secure this route to specific Rock roles.";
+        }
+
         if (row.isSecured) {
             if (row.isNeededByRock) {
                 return "No public or all authenticated action-level permissions were found.";

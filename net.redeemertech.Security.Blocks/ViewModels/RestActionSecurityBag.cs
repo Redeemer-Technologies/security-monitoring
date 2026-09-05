@@ -22,6 +22,8 @@ namespace net.redeemertech.Security.Blocks.ViewModels
 
         public bool IsSecured { get; set; }
 
+        public bool IsSecurable { get; set; }
+
         public string SecurityStatus { get; set; }
 
         public bool IsSecurityDisabled { get; set; }

@@ -8,6 +8,7 @@ export type RestActionSecurityBag = {
     requestCountLast30Days?: number | null;
     isNeededByRock: boolean;
     isSecured: boolean;
+    isSecurable: boolean;
     securityStatus: string;
     isSecurityDisabled: boolean;
     reasons: string[];

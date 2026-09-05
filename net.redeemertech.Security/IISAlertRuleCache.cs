@@ -189,6 +189,7 @@ namespace net.redeemertech.Security
             HasPostAuthenticationRules = _postAuthenticationRules.Count > 0;
             HasEndRequestRules = _endRequestRules.Count > 0;
             HasSecurityRoleConditions = ruleList.Any( rule => rule.HasSecurityRoleCondition );
+            HasAccountLockoutRules = ruleList.Any( rule => rule.LockOutUserAccounts );
             RequiredHeaderNames = GetRequiredHeaders( ruleList, IISRequestRuleField.RequestHeader );
             RequiredResponseHeaderNames = GetRequiredHeaders( ruleList, IISRequestRuleField.ResponseHeader );
             LoadDiagnostics = AsReadOnly( loadDiagnostics ?? Enumerable.Empty<string>() );
@@ -201,6 +202,8 @@ namespace net.redeemertech.Security
         public bool HasEndRequestRules { get; private set; }
 
         public bool HasSecurityRoleConditions { get; private set; }
+
+        public bool HasAccountLockoutRules { get; private set; }
 
         public IReadOnlyList<string> RequiredHeaderNames { get; private set; }
 
@@ -252,16 +255,21 @@ namespace net.redeemertech.Security
 
         public bool IdentityResolved { get; private set; }
 
+        public bool IsLocalRequest { get; internal set; }
+
+        public bool SuppressAccountLockout { get; private set; }
+
         public void SetValue( string field, object value )
         {
             _values[field] = value == null ? string.Empty : Convert.ToString( value, System.Globalization.CultureInfo.InvariantCulture );
         }
 
-        public void SetIdentity( bool isAuthenticated, string userName, Guid? personGuid )
+        public void SetIdentity( bool isAuthenticated, string userName, Guid? personGuid, bool suppressAccountLockout = false )
         {
             SetValue( IISRequestRuleField.IsAuthenticated, isAuthenticated ? "true" : "false" );
             SetValue( IISRequestRuleField.UserName, isAuthenticated ? userName : string.Empty );
             PersonGuid = personGuid;
+            SuppressAccountLockout = suppressAccountLockout;
             IdentityResolved = true;
         }
 
@@ -330,7 +338,9 @@ namespace net.redeemertech.Security
             {
                 StartedDateTimeUtc = StartedDateTimeUtc,
                 PersonGuid = PersonGuid,
-                IdentityResolved = IdentityResolved
+                IdentityResolved = IdentityResolved,
+                IsLocalRequest = IsLocalRequest,
+                SuppressAccountLockout = SuppressAccountLockout
             };
 
             foreach ( var value in _values )
@@ -360,13 +370,31 @@ namespace net.redeemertech.Security
         }
     }
 
+    internal interface IIISAlertRuleConfigurationLoader
+    {
+        IISAlertRuleConfiguration Load();
+    }
+
+    internal sealed class IISAlertRuleConfigurationLoader : IIISAlertRuleConfigurationLoader
+    {
+        public IISAlertRuleConfiguration Load()
+        {
+            return IISAlertRuleCache.BuildConfiguration();
+        }
+    }
+
     public static class IISAlertRuleCache
     {
         private static readonly object LoadLock = new object();
+        private static readonly TimeSpan ReloadFailureRetryInterval = TimeSpan.FromMinutes( 1 );
+        private static readonly IISAlertRuleConfiguration EmptyConfiguration = new IISAlertRuleConfiguration( new IISRealtimeRule[0] );
+        private static readonly IIISAlertRuleConfigurationLoader ConfigurationLoader = new IISAlertRuleConfigurationLoader();
         private static readonly ConcurrentDictionary<int, DateTime> NextTriggerDateTimes = new ConcurrentDictionary<int, DateTime>();
         private static IISAlertRuleConfiguration _configuration;
         private static long _reloadSequence;
         private static long _publishedReloadSequence;
+        private static long _reloadAfterUtcTicks;
+        private static int _reloadRequired;
 
         public static bool HasActiveRules
         {
@@ -424,15 +452,10 @@ namespace net.redeemertech.Security
             }
         }
 
-        internal static List<IISRealtimeRule> GetMatchingRules( IISRequestRuleStage stage, IISRequestRuleSnapshot snapshot )
-        {
-            return Capture().GetMatchingRules( stage, snapshot );
-        }
-
         internal static IISAlertRuleConfiguration Capture()
         {
             EnsureLoaded();
-            return Volatile.Read( ref _configuration );
+            return Volatile.Read( ref _configuration ) ?? EmptyConfiguration;
         }
 
         internal static IISAlertRuleConfiguration PublishConfiguration( IISAlertRuleConfiguration configuration )
@@ -442,41 +465,71 @@ namespace net.redeemertech.Security
                 throw new ArgumentNullException( nameof( configuration ) );
             }
 
-            return Interlocked.Exchange( ref _configuration, configuration );
+            var previousConfiguration = Interlocked.Exchange( ref _configuration, configuration );
+            Interlocked.Exchange( ref _reloadRequired, 0 );
+            Interlocked.Exchange( ref _reloadAfterUtcTicks, 0 );
+            return previousConfiguration;
         }
 
         public static void EnsureLoaded()
         {
-            if ( Volatile.Read( ref _configuration ) != null )
+            if ( Volatile.Read( ref _configuration ) != null && Volatile.Read( ref _reloadRequired ) == 0 )
+            {
+                return;
+            }
+
+            if ( DateTime.UtcNow.Ticks < Interlocked.Read( ref _reloadAfterUtcTicks ) )
             {
                 return;
             }
 
             lock ( LoadLock )
             {
-                if ( Volatile.Read( ref _configuration ) == null )
+                if ( ( Volatile.Read( ref _configuration ) == null || Volatile.Read( ref _reloadRequired ) != 0 )
+                    && DateTime.UtcNow.Ticks >= Interlocked.Read( ref _reloadAfterUtcTicks ) )
                 {
-                    ReloadCore( Interlocked.Increment( ref _reloadSequence ), BuildConfiguration );
+                    TryReloadCore( Interlocked.Increment( ref _reloadSequence ), ConfigurationLoader, IISAlertRuntime.ExceptionLogger );
                 }
             }
         }
 
         public static void Reload()
         {
-            ReloadCore( Interlocked.Increment( ref _reloadSequence ), BuildConfiguration );
+            TryReloadCore( Interlocked.Increment( ref _reloadSequence ), ConfigurationLoader, IISAlertRuntime.ExceptionLogger );
         }
 
-        internal static void Reload( Func<IISAlertRuleConfiguration> configurationLoader )
+        internal static void Reload( IIISAlertRuleConfigurationLoader configurationLoader, IIISAlertExceptionLogger exceptionLogger )
         {
             if ( configurationLoader == null )
             {
                 throw new ArgumentNullException( nameof( configurationLoader ) );
             }
+            if ( exceptionLogger == null )
+            {
+                throw new ArgumentNullException( nameof( exceptionLogger ) );
+            }
 
-            ReloadCore( Interlocked.Increment( ref _reloadSequence ), configurationLoader );
+            TryReloadCore( Interlocked.Increment( ref _reloadSequence ), configurationLoader, exceptionLogger );
         }
 
-        private static void ReloadCore( long reloadSequence, Func<IISAlertRuleConfiguration> configurationLoader )
+        private static void TryReloadCore(
+            long reloadSequence,
+            IIISAlertRuleConfigurationLoader configurationLoader,
+            IIISAlertExceptionLogger exceptionLogger )
+        {
+            try
+            {
+                ReloadCore( reloadSequence, configurationLoader );
+            }
+            catch ( Exception ex )
+            {
+                Interlocked.Exchange( ref _reloadRequired, 1 );
+                Interlocked.Exchange( ref _reloadAfterUtcTicks, DateTime.UtcNow.Add( ReloadFailureRetryInterval ).Ticks );
+                IISAlertFailureHandling.LogFailOpen( exceptionLogger, "rule configuration reload", ex );
+            }
+        }
+
+        private static void ReloadCore( long reloadSequence, IIISAlertRuleConfigurationLoader configurationLoader )
         {
             lock ( LoadLock )
             {
@@ -485,7 +538,7 @@ namespace net.redeemertech.Security
                     return;
                 }
 
-                var configuration = configurationLoader();
+                var configuration = configurationLoader.Load();
                 if ( configuration == null )
                 {
                     throw new InvalidOperationException( "The IIS alert configuration loader returned null." );
@@ -494,13 +547,19 @@ namespace net.redeemertech.Security
                 {
                     IISAuthenticatedUserCache.Reload();
                 }
+                else if ( configuration.HasAccountLockoutRules )
+                {
+                    // Administrator protection needs the username-to-person map, but a cache
+                    // failure must not prevent unrelated notifications or request/IP actions.
+                    IISAuthenticatedUserCache.EnsureLoaded();
+                }
 
                 PublishConfiguration( configuration );
                 _publishedReloadSequence = reloadSequence;
             }
         }
 
-        private static IISAlertRuleConfiguration BuildConfiguration()
+        internal static IISAlertRuleConfiguration BuildConfiguration()
         {
             var serializer = new JavaScriptSerializer();
             var compiledRules = new List<IISRealtimeRule>();

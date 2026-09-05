@@ -9,7 +9,6 @@ using Rock.Model;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Linq;
 using System.Web.Hosting;
 using System.Web.Script.Serialization;
@@ -115,37 +114,89 @@ namespace net.redeemertech.Security
         }
     }
 
-    internal static class IISAlertRealtimeActionProcessor
+    internal interface IIISAlertRealtimeActionOperations
+    {
+        IISAlertHistoryResult PersistHistory( IISAlertRealtimeEvent alertEvent );
+
+        void PersistIpBlock( IISAlertRealtimeEvent alertEvent, int? historyId );
+
+        bool LockOutUserAccount( IISAlertRealtimeEvent alertEvent );
+
+        void SendAlertEmail( IISAlertRealtimeEvent alertEvent, string summary, int? historyId );
+
+        void UpdateHistoryOutcomes( int historyId, Dictionary<string, string> result );
+
+        string ResolveSummary( IISAlertRealtimeEvent alertEvent );
+    }
+
+    internal sealed class IISAlertRealtimeActionOperations : IIISAlertRealtimeActionOperations
+    {
+        private readonly IIISAlertExceptionLogger _exceptionLogger;
+
+        internal IISAlertRealtimeActionOperations( IIISAlertExceptionLogger exceptionLogger )
+        {
+            _exceptionLogger = exceptionLogger ?? throw new ArgumentNullException( nameof( exceptionLogger ) );
+        }
+
+        public IISAlertHistoryResult PersistHistory( IISAlertRealtimeEvent alertEvent )
+        {
+            string summary;
+            var historyId = IISAlertRealtimeActionProcessor.PersistHistory( alertEvent, _exceptionLogger, out summary );
+            return new IISAlertHistoryResult { HistoryId = historyId, Summary = summary };
+        }
+
+        public void PersistIpBlock( IISAlertRealtimeEvent alertEvent, int? historyId )
+        {
+            IISAlertRealtimeActionProcessor.PersistIpBlock( alertEvent, historyId, _exceptionLogger );
+        }
+
+        public bool LockOutUserAccount( IISAlertRealtimeEvent alertEvent )
+        {
+            return IISAlertRealtimeActionProcessor.LockOutUserAccount( alertEvent );
+        }
+
+        public void SendAlertEmail( IISAlertRealtimeEvent alertEvent, string summary, int? historyId )
+        {
+            IISAlertRealtimeActionProcessor.SendAlertEmail( alertEvent, summary, historyId );
+        }
+
+        public void UpdateHistoryOutcomes( int historyId, Dictionary<string, string> result )
+        {
+            IISAlertRealtimeActionProcessor.UpdateHistoryOutcomes( historyId, result );
+        }
+
+        public string ResolveSummary( IISAlertRealtimeEvent alertEvent )
+        {
+            return IISAlertRealtimeActionProcessor.ResolveSummary( alertEvent );
+        }
+    }
+
+    internal sealed class IISAlertRealtimeActionProcessor : IIISAlertRealtimeActionQueue
     {
         private static readonly Guid AlertSystemCommunicationGuid = new Guid( "94fbe63b-5e70-4332-898a-d8031512dc82" );
         private const string AlertHistoryDetailPageGuid = "20FBEDA7-3028-4924-B29A-B445CF6CAEAE";
-        internal static Func<IISAlertRealtimeEvent, bool> QueueOverride;
-        internal static Func<IISAlertRealtimeEvent, IISAlertHistoryResult> PersistHistoryOverride;
-        internal static Action<IISAlertRealtimeEvent, int?> PersistIpBlockOverride;
-        internal static Action<IISAlertRealtimeEvent> LockOutUserAccountOverride;
-        internal static Action<IISAlertRealtimeEvent, string, int?> SendAlertEmailOverride;
-        internal static Action<int, Dictionary<string, string>> UpdateHistoryOutcomesOverride;
-        internal static Action<Exception> ExceptionLoggerOverride;
-        internal static Func<IISAlertRealtimeEvent, string> ResolveSummaryOverride;
+        private readonly IIISAlertRealtimeActionOperations _operations;
+        private readonly IIISAlertExceptionLogger _exceptionLogger;
 
-        public static bool Queue( IISAlertRealtimeEvent alertEvent )
+        internal IISAlertRealtimeActionProcessor( IIISAlertRealtimeActionOperations operations, IIISAlertExceptionLogger exceptionLogger )
         {
-            if ( QueueOverride != null )
-            {
-                return QueueOverride( alertEvent );
-            }
+            _operations = operations ?? throw new ArgumentNullException( nameof( operations ) );
+            _exceptionLogger = exceptionLogger ?? throw new ArgumentNullException( nameof( exceptionLogger ) );
+        }
 
+        public bool Queue( IISAlertRealtimeEvent alertEvent, IIISAlertClaimReleaser claimReleaser )
+        {
             try
             {
                 HostingEnvironment.QueueBackgroundWorkItem( cancellationToken =>
                 {
                     if ( cancellationToken.IsCancellationRequested )
                     {
-                        IISAlertRequestRuleProcessor.ReleaseUnprocessedClaims( alertEvent );
+                        claimReleaser.ReleaseUnprocessedClaims( alertEvent );
                         return;
                     }
 
-                    Process( alertEvent );
+                    Process( alertEvent, claimReleaser );
                 } );
                 return true;
             }
@@ -157,7 +208,7 @@ namespace net.redeemertech.Security
             }
         }
 
-        internal static void Process( IISAlertRealtimeEvent alertEvent )
+        internal void Process( IISAlertRealtimeEvent alertEvent, IIISAlertClaimReleaser claimReleaser )
         {
             int? historyId = null;
             string summary = null;
@@ -166,16 +217,9 @@ namespace net.redeemertech.Security
             {
                 var historySucceeded = TryExecute( "save realtime IIS alert history", () =>
                 {
-                    if ( PersistHistoryOverride == null )
-                    {
-                        historyId = PersistHistory( alertEvent, out summary );
-                    }
-                    else
-                    {
-                        var historyResult = PersistHistoryOverride( alertEvent );
-                        historyId = historyResult.HistoryId;
-                        summary = historyResult.Summary;
-                    }
+                    var historyResult = _operations.PersistHistory( alertEvent );
+                    historyId = historyResult.HistoryId;
+                    summary = historyResult.Summary;
                 } );
                 alertEvent.ActionOutcomes["ActionHistory"] = historySucceeded && historyId.HasValue ? "Succeeded" : "Failed";
             }
@@ -188,20 +232,13 @@ namespace net.redeemertech.Security
             {
                 var ipBlockSucceeded = TryExecuteWithRetry( "persist realtime IIS IP block", 3, () =>
                 {
-                    if ( PersistIpBlockOverride == null )
-                    {
-                        PersistIpBlock( alertEvent, historyId );
-                    }
-                    else
-                    {
-                        PersistIpBlockOverride( alertEvent, historyId );
-                    }
+                    _operations.PersistIpBlock( alertEvent, historyId );
                 } );
                 alertEvent.ActionOutcomes["ActionIpBlock"] = ipBlockSucceeded ? "Succeeded" : "Failed";
                 if ( !ipBlockSucceeded )
                 {
                     // Persistent enforcement is idempotent. Let the next matching request retry a failed write.
-                    IISAlertRequestRuleProcessor.ReleaseEnforcementClaim(
+                    claimReleaser.ReleaseEnforcementClaim(
                         alertEvent.RuleId,
                         alertEvent.RuleVersion,
                         "ip",
@@ -216,21 +253,17 @@ namespace net.redeemertech.Security
 
             if ( alertEvent.UserNameToLockOut.IsNotNullOrWhiteSpace() )
             {
+                var accountLockoutSkipped = false;
                 var lockoutSucceeded = TryExecuteWithRetry( "lock out realtime IIS alert account", 3, () =>
                 {
-                    if ( LockOutUserAccountOverride == null )
-                    {
-                        LockOutUserAccount( alertEvent );
-                    }
-                    else
-                    {
-                        LockOutUserAccountOverride( alertEvent );
-                    }
+                    accountLockoutSkipped = !_operations.LockOutUserAccount( alertEvent );
                 } );
-                alertEvent.ActionOutcomes["ActionAccountLockout"] = lockoutSucceeded ? "Succeeded" : "Failed";
+                alertEvent.ActionOutcomes["ActionAccountLockout"] = lockoutSucceeded
+                    ? ( accountLockoutSkipped ? "SkippedRockAdministrator" : "Succeeded" )
+                    : "Failed";
                 if ( !lockoutSucceeded )
                 {
-                    IISAlertRequestRuleProcessor.ReleaseEnforcementClaim(
+                    claimReleaser.ReleaseEnforcementClaim(
                         alertEvent.RuleId,
                         alertEvent.RuleVersion,
                         "account",
@@ -247,21 +280,14 @@ namespace net.redeemertech.Security
             {
                 if ( summary == null )
                 {
-                    TryExecute( "render realtime IIS alert summary", () => summary = RenderSummary( alertEvent ) );
+                    TryExecute( "render realtime IIS alert summary", () => summary = _operations.ResolveSummary( alertEvent ) );
                 }
 
                 alertEvent.ActionOutcomes["ActionEmail"] = TryExecute(
                     "send realtime IIS alert email",
                     () =>
                     {
-                        if ( SendAlertEmailOverride == null )
-                        {
-                            SendAlertEmail( alertEvent, summary ?? string.Empty, historyId );
-                        }
-                        else
-                        {
-                            SendAlertEmailOverride( alertEvent, summary ?? string.Empty, historyId );
-                        }
+                        _operations.SendAlertEmail( alertEvent, summary ?? string.Empty, historyId );
                     } )
                     ? "Succeeded"
                     : "Failed";
@@ -275,40 +301,21 @@ namespace net.redeemertech.Security
             {
                 TryExecute( "record realtime IIS alert action outcomes", () =>
                 {
-                    if ( UpdateHistoryOutcomesOverride == null )
-                    {
-                        UpdateHistoryOutcomes( historyId.Value, alertEvent.CreatePersistedResult() );
-                    }
-                    else
-                    {
-                        UpdateHistoryOutcomesOverride( historyId.Value, alertEvent.CreatePersistedResult() );
-                    }
+                    _operations.UpdateHistoryOutcomes( historyId.Value, alertEvent.CreatePersistedResult() );
                 } );
             }
         }
 
-        internal static void ResetTestHooks()
+        internal static int? PersistHistory( IISAlertRealtimeEvent alertEvent, IIISAlertExceptionLogger exceptionLogger, out string summary )
         {
-            QueueOverride = null;
-            PersistHistoryOverride = null;
-            PersistIpBlockOverride = null;
-            LockOutUserAccountOverride = null;
-            SendAlertEmailOverride = null;
-            UpdateHistoryOutcomesOverride = null;
-            ExceptionLoggerOverride = null;
-            ResolveSummaryOverride = null;
-        }
-
-        private static int? PersistHistory( IISAlertRealtimeEvent alertEvent, out string summary )
-        {
-            summary = RenderSummary( alertEvent );
+            summary = ResolveSummary( alertEvent );
             using ( var rockContext = new RockContext() )
             {
                 var alert = new IISAlertService( rockContext ).Get( alertEvent.RuleId );
                 if ( alert == null )
                 {
                     // History requires a live parent row. Other captured actions remain valid and continue below.
-                    LogException( new InvalidOperationException(
+                    IISAlertFailureHandling.LogSafely( exceptionLogger, new InvalidOperationException(
                         string.Format(
                             "Realtime IIS alert {0} ({1}, version {2}) was deleted before its captured event could be saved. History was skipped.",
                             alertEvent.RuleId,
@@ -334,7 +341,7 @@ namespace net.redeemertech.Security
             }
         }
 
-        private static string ResolveSummary( IISAlertRealtimeEvent alertEvent )
+        internal static string ResolveSummary( IISAlertRealtimeEvent alertEvent )
         {
             var template = alertEvent.SummaryLava.IfEmpty( "Real-time request rule matched." );
             var mergeFields = new Dictionary<string, object>
@@ -348,14 +355,7 @@ namespace net.redeemertech.Security
             return template.ResolveMergeFields( mergeFields, string.Empty );
         }
 
-        private static string RenderSummary( IISAlertRealtimeEvent alertEvent )
-        {
-            return ResolveSummaryOverride == null
-                ? ResolveSummary( alertEvent )
-                : ResolveSummaryOverride( alertEvent );
-        }
-
-        private static void PersistIpBlock( IISAlertRealtimeEvent alertEvent, int? historyId )
+        internal static void PersistIpBlock( IISAlertRealtimeEvent alertEvent, int? historyId, IIISAlertExceptionLogger exceptionLogger )
         {
             var now = RockDateTime.Now;
             var expiresDateTime = alertEvent.MatchedDateTime.AddMinutes( Math.Max( 1, alertEvent.BlockIpAddressMinutes ) );
@@ -386,7 +386,16 @@ namespace net.redeemertech.Security
 
             // Attribution is useful but optional. Persist the enforcement first so a concurrently
             // deleted rule or history row cannot prevent the captured block from taking effect.
-            TryExecute( "link realtime IIS IP block attribution", () => LinkIpBlockAttribution( blockedIpId, alertEvent.RuleId, historyId ) );
+            try
+            {
+                LinkIpBlockAttribution( blockedIpId, alertEvent.RuleId, historyId );
+            }
+            catch ( Exception ex )
+            {
+                IISAlertFailureHandling.LogSafely(
+                    exceptionLogger,
+                    new Exception( "Unable to link realtime IIS IP block attribution.", ex ) );
+            }
         }
 
         private static void LinkIpBlockAttribution( int blockedIpId, int ruleId, int? historyId )
@@ -408,7 +417,7 @@ namespace net.redeemertech.Security
             }
         }
 
-        private static void LockOutUserAccount( IISAlertRealtimeEvent alertEvent )
+        internal static bool LockOutUserAccount( IISAlertRealtimeEvent alertEvent )
         {
             using ( var rockContext = new RockContext() )
             {
@@ -416,16 +425,22 @@ namespace net.redeemertech.Security
                     .FirstOrDefault( login => login.UserName == alertEvent.UserNameToLockOut );
                 if ( userLogin == null )
                 {
-                    return;
+                    return true;
+                }
+
+                if ( IISAlertAccountProtection.IsRockAdministrator( rockContext, userLogin.PersonId ) )
+                {
+                    return false;
                 }
 
                 userLogin.IsLockedOut = true;
                 userLogin.LastLockedOutDateTime = alertEvent.MatchedDateTime;
                 rockContext.SaveChanges();
+                return true;
             }
         }
 
-        private static void SendAlertEmail( IISAlertRealtimeEvent alertEvent, string summary, int? historyId )
+        internal static void SendAlertEmail( IISAlertRealtimeEvent alertEvent, string summary, int? historyId )
         {
             var mergeFields = Rock.Lava.LavaHelper.GetCommonMergeFields( null );
             mergeFields.AddOrReplace( "AlertName", alertEvent.RuleName );
@@ -453,7 +468,7 @@ namespace net.redeemertech.Security
             }
         }
 
-        private static bool TryExecuteWithRetry( string actionName, int maximumAttempts, Action action )
+        private bool TryExecuteWithRetry( string actionName, int maximumAttempts, Action action )
         {
             Exception lastException = null;
             for ( var attempt = 1; attempt <= maximumAttempts; attempt++ )
@@ -475,7 +490,7 @@ namespace net.redeemertech.Security
             return false;
         }
 
-        private static bool TryExecute( string actionName, Action action )
+        private bool TryExecute( string actionName, Action action )
         {
             try
             {
@@ -489,29 +504,12 @@ namespace net.redeemertech.Security
             }
         }
 
-        private static void LogException( Exception exception )
+        private void LogException( Exception exception )
         {
-            try
-            {
-                if ( ExceptionLoggerOverride == null )
-                {
-                    ExceptionLogService.LogException( exception );
-                }
-                else
-                {
-                    ExceptionLoggerOverride( exception );
-                }
-            }
-            catch ( Exception loggingException )
-            {
-                Trace.TraceError(
-                    "Unable to record real-time IIS alert failure. Original: {0} Logging: {1}",
-                    exception,
-                    loggingException );
-            }
+            IISAlertFailureHandling.LogSafely( _exceptionLogger, exception );
         }
 
-        private static void UpdateHistoryOutcomes( int historyId, Dictionary<string, string> result )
+        internal static void UpdateHistoryOutcomes( int historyId, Dictionary<string, string> result )
         {
             using ( var rockContext = new RockContext() )
             {

@@ -37,7 +37,7 @@ namespace net.redeemertech.Security.Tests
             var previousConfiguration = IISAlertRuleCache.PublishConfiguration( new IISAlertRuleConfiguration( new IISRealtimeRule[0] ) );
             try
             {
-                firstReload = Task.Run( () => IISAlertRuleCache.Reload( () =>
+                firstReload = Task.Run( () => IISAlertRuleCache.Reload( new DelegateConfigurationLoader( () =>
                 {
                     var active = Interlocked.Increment( ref activeLoaders );
                     SetMaximum( ref maximumActiveLoaders, active );
@@ -45,20 +45,20 @@ namespace net.redeemertech.Security.Tests
                     Assert.IsTrue( allowFirstLoaderToFinish.Wait( TimeSpan.FromSeconds( 5 ) ) );
                     Interlocked.Decrement( ref activeLoaders );
                     return firstConfiguration;
-                } ) );
+                } ), new RecordingExceptionLogger() ) );
 
                 Assert.IsTrue( firstLoaderEntered.Wait( TimeSpan.FromSeconds( 5 ) ) );
                 secondReload = Task.Run( () =>
                 {
                     secondCallStarted.Set();
-                    IISAlertRuleCache.Reload( () =>
+                    IISAlertRuleCache.Reload( new DelegateConfigurationLoader( () =>
                     {
                         var active = Interlocked.Increment( ref activeLoaders );
                         SetMaximum( ref maximumActiveLoaders, active );
                         secondLoaderEntered.Set();
                         Interlocked.Decrement( ref activeLoaders );
                         return secondConfiguration;
-                    } );
+                    } ), new RecordingExceptionLogger() );
                 } );
 
                 Assert.IsTrue( secondCallStarted.Wait( TimeSpan.FromSeconds( 5 ) ) );
@@ -102,6 +102,49 @@ namespace net.redeemertech.Security.Tests
         }
 
         [TestMethod]
+        public void FailedReloadKeepsLastKnownGoodConfigurationAndLogsTheFailure()
+        {
+            var originalConfiguration = CreateConfiguration( "X-Original", "old" );
+            var previousConfiguration = IISAlertRuleCache.PublishConfiguration( originalConfiguration );
+            var exceptionLogger = new RecordingExceptionLogger();
+
+            try
+            {
+                IISAlertRuleCache.Reload(
+                    new DelegateConfigurationLoader( () => throw new InvalidOperationException( "injected reload failure" ) ),
+                    exceptionLogger );
+
+                CollectionAssert.AreEqual( new[] { "X-Original" }, IISAlertRuleCache.Capture().RequiredHeaderNames.ToArray() );
+                Assert.IsNotNull( exceptionLogger.LastException );
+                StringAssert.Contains( exceptionLogger.LastException.Message, "failed open" );
+                Assert.IsInstanceOfType( exceptionLogger.LastException.InnerException, typeof( InvalidOperationException ) );
+            }
+            finally
+            {
+                RestoreConfiguration( previousConfiguration );
+            }
+        }
+
+        [TestMethod]
+        public void RequestBoundaryLogsAndSwallowsFailures()
+        {
+            var exceptionLogger = new RecordingExceptionLogger();
+            var completed = IISAlertBlockHttpModule.ExecuteFailOpen(
+                "test boundary",
+                () => throw new InvalidOperationException( "injected request failure" ),
+                exceptionLogger );
+
+            Assert.IsFalse( completed );
+            Assert.IsNotNull( exceptionLogger.LastException );
+            StringAssert.Contains( exceptionLogger.LastException.Message, "test boundary" );
+
+            Assert.IsFalse( IISAlertBlockHttpModule.ExecuteFailOpen(
+                "test boundary with unavailable logger",
+                () => throw new InvalidOperationException( "injected request failure" ),
+                new ThrowingExceptionLogger() ) );
+        }
+
+        [TestMethod]
         public void ApiFilterUsesCapturedConfigurationAndQueuesOneEventWithResolvedIdentity()
         {
             var capturedConfiguration = CreateConfiguration( IISRequestRuleField.UserName, "alice", IISRequestRuleStage.PostAuthentication, false, 987654 );
@@ -122,7 +165,9 @@ namespace net.redeemertech.Security.Tests
             {
                 ControllerContext = new HttpControllerContext { Request = request, RequestContext = requestContext }
             };
-            var filter = new IISAlertApiPostAuthenticationFilter();
+            var actionQueue = new RecordingActionQueue();
+            var requestRuleProcessor = new IISAlertRequestRuleProcessor( actionQueue, new FixedClock( DateTime.Now ) );
+            var filter = new IISAlertApiPostAuthenticationFilter( requestRuleProcessor, new RecordingExceptionLogger() );
             var queuedCount = 0;
             IISAlertRealtimeEvent queuedEvent = null;
             var previousHttpContext = HttpContext.Current;
@@ -131,7 +176,7 @@ namespace net.redeemertech.Security.Tests
             try
             {
                 HttpContext.Current = context;
-                IISAlertRealtimeActionProcessor.QueueOverride = alertEvent =>
+                actionQueue.OnQueue = ( alertEvent, claimReleaser ) =>
                 {
                     queuedEvent = alertEvent;
                     Interlocked.Increment( ref queuedCount );
@@ -152,7 +197,6 @@ namespace net.redeemertech.Security.Tests
             }
             finally
             {
-                IISAlertRealtimeActionProcessor.ResetTestHooks();
                 HttpContext.Current = previousHttpContext;
                 RestoreConfiguration( previousConfiguration );
                 request.Dispose();
@@ -219,6 +263,59 @@ namespace net.redeemertech.Security.Tests
                 }
             }
             while ( Interlocked.CompareExchange( ref maximum, value, current ) != current );
+        }
+
+        private sealed class DelegateConfigurationLoader : IIISAlertRuleConfigurationLoader
+        {
+            private readonly Func<IISAlertRuleConfiguration> _load;
+
+            public DelegateConfigurationLoader( Func<IISAlertRuleConfiguration> load )
+            {
+                _load = load;
+            }
+
+            public IISAlertRuleConfiguration Load()
+            {
+                return _load();
+            }
+        }
+
+        private sealed class RecordingExceptionLogger : IIISAlertExceptionLogger
+        {
+            public Exception LastException { get; private set; }
+
+            public void Log( Exception exception )
+            {
+                LastException = exception;
+            }
+        }
+
+        private sealed class ThrowingExceptionLogger : IIISAlertExceptionLogger
+        {
+            public void Log( Exception exception )
+            {
+                throw new InvalidOperationException( "injected logger failure" );
+            }
+        }
+
+        private sealed class FixedClock : IIISAlertClock
+        {
+            public FixedClock( DateTime now )
+            {
+                Now = now;
+            }
+
+            public DateTime Now { get; private set; }
+        }
+
+        private sealed class RecordingActionQueue : IIISAlertRealtimeActionQueue
+        {
+            public Func<IISAlertRealtimeEvent, IIISAlertClaimReleaser, bool> OnQueue { get; set; }
+
+            public bool Queue( IISAlertRealtimeEvent alertEvent, IIISAlertClaimReleaser claimReleaser )
+            {
+                return OnQueue == null || OnQueue( alertEvent, claimReleaser );
+            }
         }
     }
 }

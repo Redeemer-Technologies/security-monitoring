@@ -23,6 +23,19 @@ namespace net.redeemertech.Security
         internal const string ConfigurationContextKey = "__RedeemertechIISRequestRuleConfiguration__";
         private const string PostAuthenticationProcessedContextKey = "__RedeemertechIISPostAuthenticationRuleProcessed__";
         private const string RequestBlockedContextKey = "__RedeemertechIISRequestBlocked__";
+        private readonly IISAlertRequestRuleProcessor _requestRuleProcessor;
+        private readonly IIISAlertExceptionLogger _exceptionLogger;
+
+        public IISAlertBlockHttpModule()
+            : this( IISAlertRuntime.RequestRuleProcessor, IISAlertRuntime.ExceptionLogger )
+        {
+        }
+
+        internal IISAlertBlockHttpModule( IISAlertRequestRuleProcessor requestRuleProcessor, IIISAlertExceptionLogger exceptionLogger )
+        {
+            _requestRuleProcessor = requestRuleProcessor ?? throw new ArgumentNullException( nameof( requestRuleProcessor ) );
+            _exceptionLogger = exceptionLogger ?? throw new ArgumentNullException( nameof( exceptionLogger ) );
+        }
 
         public override bool IsActive => true;
 
@@ -32,14 +45,20 @@ namespace net.redeemertech.Security
 
         public override void Init( HttpApplication context )
         {
-            IISAlertBlockedIpCache.EnsureLoaded();
-            IISAlertRuleCache.EnsureLoaded();
             context.BeginRequest += Application_BeginRequest;
             context.PostAuthenticateRequest += Application_PostAuthenticateRequest;
             context.EndRequest += Application_EndRequest;
+
+            ExecuteFailOpen( "HTTP module initialization", () => IISAlertBlockedIpCache.EnsureLoaded() );
+            ExecuteFailOpen( "HTTP module initialization", () => IISAlertRuleCache.EnsureLoaded() );
         }
 
         private void Application_BeginRequest( object sender, EventArgs e )
+        {
+            ExecuteFailOpen( "BeginRequest", () => Application_BeginRequestCore( sender ) );
+        }
+
+        private void Application_BeginRequestCore( object sender )
         {
             var application = sender as HttpApplication;
             var context = application?.Context;
@@ -49,7 +68,8 @@ namespace net.redeemertech.Security
             }
 
             var ipAddress = WebRequestHelper.GetClientIpAddress( new HttpRequestWrapper( context.Request ) );
-            if ( IISAlertBlockedIpCache.IsBlocked( ipAddress ) )
+            var isLocalRequest = IISAlertLocalRequestDetector.IsLocalRequest( context.Request, ipAddress );
+            if ( !isLocalRequest && IISAlertBlockedIpCache.IsBlocked( ipAddress ) )
             {
                 BlockRequest( context, application, 404, string.Empty );
                 return;
@@ -63,12 +83,18 @@ namespace net.redeemertech.Security
             }
 
             var snapshot = CreateSnapshot( context, ipAddress, configuration );
+            snapshot.IsLocalRequest = isLocalRequest;
             context.Items[SnapshotContextKey] = snapshot;
 
             ProcessRules( context, configuration, snapshot, IISRequestRuleStage.PreAuthentication );
         }
 
         private void Application_PostAuthenticateRequest( object sender, EventArgs e )
+        {
+            ExecuteFailOpen( "PostAuthenticateRequest", () => Application_PostAuthenticateRequestCore( sender ) );
+        }
+
+        private void Application_PostAuthenticateRequestCore( object sender )
         {
             var application = sender as HttpApplication;
             var context = application?.Context;
@@ -84,7 +110,7 @@ namespace net.redeemertech.Security
                 return;
             }
 
-            var blockResult = ProcessPostAuthenticationRules( context, configuration, snapshot, context.User ?? Thread.CurrentPrincipal );
+            var blockResult = ProcessPostAuthenticationRules( context, configuration, snapshot, context.User ?? Thread.CurrentPrincipal, null, _requestRuleProcessor );
             if ( blockResult != null )
             {
                 BlockRequest( context, application, blockResult.StatusCode, blockResult.Message );
@@ -92,6 +118,11 @@ namespace net.redeemertech.Security
         }
 
         private void Application_EndRequest( object sender, EventArgs e )
+        {
+            ExecuteFailOpen( "EndRequest", () => Application_EndRequestCore( sender ) );
+        }
+
+        private void Application_EndRequestCore( object sender )
         {
             var application = sender as HttpApplication;
             var context = application?.Context;
@@ -120,17 +151,13 @@ namespace net.redeemertech.Security
             ProcessRules( context, configuration, snapshot, IISRequestRuleStage.EndRequest );
         }
 
-        internal static IISRequestRuleSnapshot CreateSnapshot( HttpContext context, string ipAddress )
-        {
-            return CreateSnapshot( context, ipAddress, IISAlertRuleCache.Capture() );
-        }
-
         internal static IISRequestRuleSnapshot CreateSnapshot( HttpContext context, string ipAddress, IISAlertRuleConfiguration configuration )
         {
             var request = context.Request;
             var snapshot = new IISRequestRuleSnapshot
             {
-                StartedDateTimeUtc = DateTime.UtcNow
+                StartedDateTimeUtc = DateTime.UtcNow,
+                IsLocalRequest = IISAlertLocalRequestDetector.IsLocalRequest( request, ipAddress )
             };
 
             snapshot.SetValue( IISRequestRuleField.ClientIp, ipAddress );
@@ -153,11 +180,6 @@ namespace net.redeemertech.Security
             return snapshot;
         }
 
-        internal static void AddIdentityValues( IPrincipal principal, IISRequestRuleSnapshot snapshot, Guid? personGuid = null )
-        {
-            AddIdentityValues( principal, snapshot, IISAlertRuleCache.Capture(), personGuid );
-        }
-
         internal static void AddIdentityValues( IPrincipal principal, IISRequestRuleSnapshot snapshot, IISAlertRuleConfiguration configuration, Guid? personGuid = null )
         {
             if ( snapshot.IdentityResolved )
@@ -169,7 +191,9 @@ namespace net.redeemertech.Security
             var isAuthenticated = identity?.IsAuthenticated == true || personGuid.HasValue;
             var userName = identity?.IsAuthenticated == true ? identity.Name : string.Empty;
 
-            if ( !personGuid.HasValue && isAuthenticated && configuration.HasSecurityRoleConditions )
+            if ( !personGuid.HasValue
+                && isAuthenticated
+                && ( configuration.HasSecurityRoleConditions || configuration.HasAccountLockoutRules ) )
             {
                 Guid cachedPersonGuid;
                 if ( IISAuthenticatedUserCache.TryGetPersonGuid( userName, out cachedPersonGuid ) )
@@ -178,25 +202,34 @@ namespace net.redeemertech.Security
                 }
             }
 
-            snapshot.SetIdentity( isAuthenticated, userName, personGuid );
+            var suppressAccountLockout = false;
+            if ( isAuthenticated && configuration.HasAccountLockoutRules )
+            {
+                // An unresolved identity must fail open for account lockout. If it is resolved,
+                // protect the built-in Rock Administrators role from automated lockout.
+                suppressAccountLockout = !personGuid.HasValue
+                    || IISAlertAccountProtection.IsRockAdministrator( personGuid.Value );
+            }
+
+            snapshot.SetIdentity( isAuthenticated, userName, personGuid, suppressAccountLockout );
         }
 
-        private static void ProcessRules( HttpContext context, IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
+        private void ProcessRules( HttpContext context, IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
         {
-            var blockResult = IISAlertRequestRuleProcessor.Process( configuration, snapshot, stage );
+            var blockResult = _requestRuleProcessor.Process( configuration, snapshot, stage );
             if ( blockResult != null )
             {
                 BlockRequest( context, context.ApplicationInstance, blockResult.StatusCode, blockResult.Message );
             }
         }
 
-        internal static IISRequestBlockResult ProcessPostAuthenticationRules( HttpContext context, IISRequestRuleSnapshot snapshot, IPrincipal principal, Guid? personGuid = null )
-        {
-            var configuration = context?.Items[ConfigurationContextKey] as IISAlertRuleConfiguration ?? IISAlertRuleCache.Capture();
-            return ProcessPostAuthenticationRules( context, configuration, snapshot, principal, personGuid );
-        }
-
-        internal static IISRequestBlockResult ProcessPostAuthenticationRules( HttpContext context, IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IPrincipal principal, Guid? personGuid = null )
+        internal static IISRequestBlockResult ProcessPostAuthenticationRules(
+            HttpContext context,
+            IISAlertRuleConfiguration configuration,
+            IISRequestRuleSnapshot snapshot,
+            IPrincipal principal,
+            Guid? personGuid,
+            IISAlertRequestRuleProcessor requestRuleProcessor )
         {
             if ( context == null
                 || configuration == null
@@ -208,7 +241,7 @@ namespace net.redeemertech.Security
 
             AddIdentityValues( principal, snapshot, configuration, personGuid );
             context.Items[PostAuthenticationProcessedContextKey] = true;
-            return IISAlertRequestRuleProcessor.Process( configuration, snapshot, IISRequestRuleStage.PostAuthentication );
+            return requestRuleProcessor.Process( configuration, snapshot, IISRequestRuleStage.PostAuthentication );
         }
 
         internal static bool IsApiRequest( HttpRequest request )
@@ -252,6 +285,25 @@ namespace net.redeemertech.Security
         private static bool IsRequestBlocked( HttpContext context )
         {
             return context.Items[RequestBlockedContextKey] is bool && ( bool ) context.Items[RequestBlockedContextKey];
+        }
+
+        private bool ExecuteFailOpen( string operation, Action action )
+        {
+            return ExecuteFailOpen( operation, action, _exceptionLogger );
+        }
+
+        internal static bool ExecuteFailOpen( string operation, Action action, IIISAlertExceptionLogger exceptionLogger )
+        {
+            try
+            {
+                action();
+                return true;
+            }
+            catch ( Exception ex )
+            {
+                IISAlertFailureHandling.LogFailOpen( exceptionLogger, operation, ex );
+                return false;
+            }
         }
     }
 }

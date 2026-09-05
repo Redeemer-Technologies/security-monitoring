@@ -78,6 +78,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="IISAlertLocalRequestDetectorTests.cs" />
     <Compile Include="IISLogDuckDbQueryTests.cs" />
     <Compile Include="IISRequestRuleTests.cs" />
     <Compile Include="IISRuleConfigurationTests.cs" />

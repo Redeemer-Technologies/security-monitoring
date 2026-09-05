@@ -7,6 +7,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Net;
+using System.Threading;
 
 namespace net.redeemertech.Security
 {
@@ -14,11 +15,18 @@ namespace net.redeemertech.Security
     {
         private static readonly ConcurrentDictionary<string, DateTime> BlockedIps = new ConcurrentDictionary<string, DateTime>( StringComparer.OrdinalIgnoreCase );
         private static readonly object LoadLock = new object();
-        private static bool _isLoaded;
+        private static readonly TimeSpan LoadFailureRetryInterval = TimeSpan.FromMinutes( 1 );
+        private static volatile bool _isLoaded;
+        private static long _loadAfterUtcTicks;
 
         public static void EnsureLoaded()
         {
             if ( _isLoaded )
+            {
+                return;
+            }
+
+            if ( DateTime.UtcNow.Ticks < Interlocked.Read( ref _loadAfterUtcTicks ) )
             {
                 return;
             }
@@ -30,8 +38,16 @@ namespace net.redeemertech.Security
                     return;
                 }
 
-                Reload();
-                _isLoaded = true;
+                try
+                {
+                    Reload();
+                    _isLoaded = true;
+                }
+                catch ( Exception ex )
+                {
+                    Interlocked.Exchange( ref _loadAfterUtcTicks, DateTime.UtcNow.Add( LoadFailureRetryInterval ).Ticks );
+                    IISAlertFailureHandling.LogFailOpen( IISAlertRuntime.ExceptionLogger, "blocked-IP cache load", ex );
+                }
             }
         }
 

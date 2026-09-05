@@ -21,7 +21,29 @@ namespace net.redeemertech.Security
     /// </summary>
     internal sealed class IISAlertApiPostAuthenticationFilter : ActionFilterAttribute
     {
+        private readonly IISAlertRequestRuleProcessor _requestRuleProcessor;
+        private readonly IIISAlertExceptionLogger _exceptionLogger;
+
+        public IISAlertApiPostAuthenticationFilter()
+            : this( IISAlertRuntime.RequestRuleProcessor, IISAlertRuntime.ExceptionLogger )
+        {
+        }
+
+        internal IISAlertApiPostAuthenticationFilter( IISAlertRequestRuleProcessor requestRuleProcessor, IIISAlertExceptionLogger exceptionLogger )
+        {
+            _requestRuleProcessor = requestRuleProcessor ?? throw new ArgumentNullException( nameof( requestRuleProcessor ) );
+            _exceptionLogger = exceptionLogger ?? throw new ArgumentNullException( nameof( exceptionLogger ) );
+        }
+
         public override void OnActionExecuting( HttpActionContext actionContext )
+        {
+            IISAlertBlockHttpModule.ExecuteFailOpen(
+                "Web API post-authentication filter",
+                () => OnActionExecutingCore( actionContext ),
+                _exceptionLogger );
+        }
+
+        private void OnActionExecutingCore( HttpActionContext actionContext )
         {
             var context = HttpContext.Current;
             if ( context == null )
@@ -59,7 +81,13 @@ namespace net.redeemertech.Security
             IPrincipal principal = actionContext.Request.GetUserPrincipal()
                 ?? actionContext.RequestContext?.Principal
                 ?? Thread.CurrentPrincipal;
-            var blockResult = IISAlertBlockHttpModule.ProcessPostAuthenticationRules( context, configuration, snapshot, principal, personGuid );
+            var blockResult = IISAlertBlockHttpModule.ProcessPostAuthenticationRules(
+                context,
+                configuration,
+                snapshot,
+                principal,
+                personGuid,
+                _requestRuleProcessor );
             if ( blockResult == null )
             {
                 return;
@@ -91,10 +119,24 @@ namespace net.redeemertech.Security
 
         public void OnStartup()
         {
-            if ( Interlocked.Exchange( ref _isRegistered, 1 ) == 0 )
-            {
-                GlobalConfiguration.Configuration.Filters.Add( new IISAlertApiPostAuthenticationFilter() );
-            }
+            IISAlertBlockHttpModule.ExecuteFailOpen(
+                "Web API filter registration",
+                () =>
+                {
+                    if ( Interlocked.Exchange( ref _isRegistered, 1 ) == 0 )
+                    {
+                        try
+                        {
+                            GlobalConfiguration.Configuration.Filters.Add( new IISAlertApiPostAuthenticationFilter() );
+                        }
+                        catch
+                        {
+                            Interlocked.Exchange( ref _isRegistered, 0 );
+                            throw;
+                        }
+                    }
+                },
+                IISAlertRuntime.ExceptionLogger );
         }
     }
 }

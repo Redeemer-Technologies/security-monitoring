@@ -31,12 +31,24 @@ namespace net.redeemertech.Security
                 return;
             }
 
+            if ( DateTime.UtcNow.Ticks < Interlocked.Read( ref _refreshAfterUtcTicks ) )
+            {
+                return;
+            }
+
             lock ( LoadLock )
             {
-                if ( !_isLoaded )
+                if ( !_isLoaded && DateTime.UtcNow.Ticks >= Interlocked.Read( ref _refreshAfterUtcTicks ) )
                 {
-                    Reload();
-                    _isLoaded = true;
+                    try
+                    {
+                        Reload();
+                    }
+                    catch ( Exception ex )
+                    {
+                        Interlocked.Exchange( ref _refreshAfterUtcTicks, DateTime.UtcNow.Add( RefreshFailureRetryInterval ).Ticks );
+                        IISAlertFailureHandling.LogFailOpen( IISAlertRuntime.ExceptionLogger, "authenticated-user cache load", ex );
+                    }
                 }
             }
         }
@@ -97,7 +109,7 @@ namespace net.redeemertech.Security
                 catch ( Exception ex )
                 {
                     Interlocked.Exchange( ref _refreshAfterUtcTicks, DateTime.UtcNow.Add( RefreshFailureRetryInterval ).Ticks );
-                    ExceptionLogService.LogException( ex );
+                    IISAlertFailureHandling.LogFailOpen( IISAlertRuntime.ExceptionLogger, "authenticated-user cache refresh", ex );
                 }
                 finally
                 {

@@ -20,35 +20,43 @@ namespace net.redeemertech.Security
     /// Executes matching rule actions independently of the ASP.NET host surface that
     /// supplied the authenticated identity.
     /// </summary>
-    internal static class IISAlertRequestRuleProcessor
+    internal sealed class IISAlertRequestRuleProcessor : IIISAlertClaimReleaser
     {
         private const int EnforcementClaimCleanupThreshold = 10000;
-        private static readonly object NotificationClaimLock = new object();
-        private static readonly Dictionary<string, NotificationClaimState> NotificationClaims = new Dictionary<string, NotificationClaimState>( StringComparer.OrdinalIgnoreCase );
-        private static readonly ConcurrentDictionary<string, DateTime> EnforcementClaims = new ConcurrentDictionary<string, DateTime>( StringComparer.OrdinalIgnoreCase );
-        private static int _enforcementCleanupCounter;
-        internal static Func<DateTime> CurrentDateTime = () => RockDateTime.Now;
+        private readonly object _notificationClaimLock = new object();
+        private readonly Dictionary<string, NotificationClaimState> _notificationClaims = new Dictionary<string, NotificationClaimState>( StringComparer.OrdinalIgnoreCase );
+        private readonly ConcurrentDictionary<string, DateTime> _enforcementClaims = new ConcurrentDictionary<string, DateTime>( StringComparer.OrdinalIgnoreCase );
+        private readonly IIISAlertRealtimeActionQueue _actionQueue;
+        private readonly IIISAlertClock _clock;
+        private int _enforcementCleanupCounter;
 
-        public static IISRequestBlockResult Process( IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
+        internal IISAlertRequestRuleProcessor( IIISAlertRealtimeActionQueue actionQueue, IIISAlertClock clock )
+        {
+            _actionQueue = actionQueue ?? throw new ArgumentNullException( nameof( actionQueue ) );
+            _clock = clock ?? throw new ArgumentNullException( nameof( clock ) );
+        }
+
+        public IISRequestBlockResult Process( IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
         {
             return Process( IISAlertRuleCache.Capture(), snapshot, stage );
         }
 
-        public static IISRequestBlockResult Process( IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
+        public IISRequestBlockResult Process( IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
         {
             var matchingRules = configuration.GetMatchingRules( stage, snapshot );
             IISRealtimeRule blockingRule = null;
-            var matchedDateTime = CurrentDateTime();
+            var matchedDateTime = _clock.Now;
 
             foreach ( var rule in matchingRules )
             {
                 int suppressedMatchCount;
                 DateTime notificationClaimExpiresDateTime;
                 var notificationClaimed = TryClaimNotification( rule, matchedDateTime, out suppressedMatchCount, out notificationClaimExpiresDateTime );
-                var ipAddress = rule.BlockIpAddress
+                var enforcementAllowed = !snapshot.IsLocalRequest;
+                var ipAddress = enforcementAllowed && rule.BlockIpAddress
                     ? IISAlertBlockedIpCache.NormalizeIpAddress( snapshot.GetValue( IISRequestRuleField.ClientIp ) )
                     : null;
-                var userName = rule.LockOutUserAccounts
+                var userName = enforcementAllowed && rule.LockOutUserAccounts && !snapshot.SuppressAccountLockout
                     ? snapshot.GetValue( IISRequestRuleField.UserName ).Trim()
                     : null;
 
@@ -78,13 +86,13 @@ namespace net.redeemertech.Security
                         accountEnforcementClaimed ? userName : null,
                         accountEnforcementClaimExpiresDateTime );
 
-                    if ( !IISAlertRealtimeActionProcessor.Queue( alertEvent ) )
+                    if ( !_actionQueue.Queue( alertEvent, this ) )
                     {
                         ReleaseUnprocessedClaims( alertEvent );
                     }
                 }
 
-                if ( blockingRule == null && rule.BlockRequest && stage != IISRequestRuleStage.EndRequest )
+                if ( enforcementAllowed && blockingRule == null && rule.BlockRequest && stage != IISRequestRuleStage.EndRequest )
                 {
                     blockingRule = rule;
                 }
@@ -99,18 +107,18 @@ namespace net.redeemertech.Security
                 };
         }
 
-        internal static void ReleaseUnprocessedClaims( IISAlertRealtimeEvent alertEvent )
+        public void ReleaseUnprocessedClaims( IISAlertRealtimeEvent alertEvent )
         {
             if ( alertEvent.NotificationClaimed )
             {
-                lock ( NotificationClaimLock )
+                lock ( _notificationClaimLock )
                 {
                     var key = GetNotificationKey( alertEvent.RuleId, alertEvent.RuleVersion );
                     NotificationClaimState state;
-                    if ( NotificationClaims.TryGetValue( key, out state )
+                    if ( _notificationClaims.TryGetValue( key, out state )
                         && state.NextNotificationDateTime == alertEvent.NotificationClaimExpiresDateTime )
                     {
-                        NotificationClaims.Remove( key );
+                        _notificationClaims.Remove( key );
                     }
                 }
             }
@@ -119,19 +127,7 @@ namespace net.redeemertech.Security
             ReleaseEnforcementClaim( alertEvent.RuleId, alertEvent.RuleVersion, "account", alertEvent.UserNameToLockOut, alertEvent.AccountEnforcementClaimExpiresDateTime );
         }
 
-        internal static void ResetStateForTests()
-        {
-            lock ( NotificationClaimLock )
-            {
-                NotificationClaims.Clear();
-            }
-
-            EnforcementClaims.Clear();
-            _enforcementCleanupCounter = 0;
-            CurrentDateTime = () => RockDateTime.Now;
-        }
-
-        internal static void ReleaseEnforcementClaim( int ruleId, string ruleVersion, string action, string target, DateTime? claimedExpiresDateTime )
+        public void ReleaseEnforcementClaim( int ruleId, string ruleVersion, string action, string target, DateTime? claimedExpiresDateTime )
         {
             if ( target.IsNullOrWhiteSpace() || !claimedExpiresDateTime.HasValue )
             {
@@ -139,24 +135,24 @@ namespace net.redeemertech.Security
             }
 
             var key = GetEnforcementKey( ruleId, ruleVersion, action, target );
-            ( ( ICollection<KeyValuePair<string, DateTime>> ) EnforcementClaims ).Remove(
+            ( ( ICollection<KeyValuePair<string, DateTime>> ) _enforcementClaims ).Remove(
                 new KeyValuePair<string, DateTime>( key, claimedExpiresDateTime.Value ) );
         }
 
-        private static bool TryClaimNotification( IISRealtimeRule rule, DateTime now, out int suppressedMatchCount, out DateTime claimExpiresDateTime )
+        private bool TryClaimNotification( IISRealtimeRule rule, DateTime now, out int suppressedMatchCount, out DateTime claimExpiresDateTime )
         {
             var key = GetNotificationKey( rule.Id, rule.Version );
-            lock ( NotificationClaimLock )
+            lock ( _notificationClaimLock )
             {
                 NotificationClaimState state;
-                if ( !NotificationClaims.TryGetValue( key, out state ) || state.NextNotificationDateTime <= now )
+                if ( !_notificationClaims.TryGetValue( key, out state ) || state.NextNotificationDateTime <= now )
                 {
                     suppressedMatchCount = state == null ? 0 : state.SuppressedMatchCount;
-                    NotificationClaims[key] = new NotificationClaimState
+                    _notificationClaims[key] = new NotificationClaimState
                     {
                         NextNotificationDateTime = now.AddMinutes( Math.Max( 1, rule.EvaluationFrequencyMinutes ) )
                     };
-                    claimExpiresDateTime = NotificationClaims[key].NextNotificationDateTime;
+                    claimExpiresDateTime = _notificationClaims[key].NextNotificationDateTime;
                     return true;
                 }
 
@@ -170,7 +166,7 @@ namespace net.redeemertech.Security
             }
         }
 
-        private static bool TryClaimEnforcement( IISRealtimeRule rule, string action, string target, DateTime now, int deduplicationMinutes, out DateTime? claimedExpiresDateTime )
+        private bool TryClaimEnforcement( IISRealtimeRule rule, string action, string target, DateTime now, int deduplicationMinutes, out DateTime? claimedExpiresDateTime )
         {
             var key = GetEnforcementKey( rule.Id, rule.Version, action, target );
             var nextDateTime = now.AddMinutes( Math.Max( 1, deduplicationMinutes ) );
@@ -178,9 +174,9 @@ namespace net.redeemertech.Security
             while ( true )
             {
                 DateTime existingDateTime;
-                if ( !EnforcementClaims.TryGetValue( key, out existingDateTime ) )
+                if ( !_enforcementClaims.TryGetValue( key, out existingDateTime ) )
                 {
-                    if ( EnforcementClaims.TryAdd( key, nextDateTime ) )
+                    if ( _enforcementClaims.TryAdd( key, nextDateTime ) )
                     {
                         claimedExpiresDateTime = nextDateTime;
                         CleanupExpiredEnforcementClaims( now );
@@ -196,7 +192,7 @@ namespace net.redeemertech.Security
                     return false;
                 }
 
-                if ( EnforcementClaims.TryUpdate( key, nextDateTime, existingDateTime ) )
+                if ( _enforcementClaims.TryUpdate( key, nextDateTime, existingDateTime ) )
                 {
                     claimedExpiresDateTime = nextDateTime;
                     CleanupExpiredEnforcementClaims( now );
@@ -205,19 +201,19 @@ namespace net.redeemertech.Security
             }
         }
 
-        private static void CleanupExpiredEnforcementClaims( DateTime now )
+        private void CleanupExpiredEnforcementClaims( DateTime now )
         {
-            if ( EnforcementClaims.Count <= EnforcementClaimCleanupThreshold
+            if ( _enforcementClaims.Count <= EnforcementClaimCleanupThreshold
                 || ( Interlocked.Increment( ref _enforcementCleanupCounter ) & 255 ) != 0 )
             {
                 return;
             }
 
-            foreach ( var claim in EnforcementClaims )
+            foreach ( var claim in _enforcementClaims )
             {
                 if ( claim.Value <= now )
                 {
-                    ( ( ICollection<KeyValuePair<string, DateTime>> ) EnforcementClaims ).Remove( claim );
+                    ( ( ICollection<KeyValuePair<string, DateTime>> ) _enforcementClaims ).Remove( claim );
                 }
             }
         }

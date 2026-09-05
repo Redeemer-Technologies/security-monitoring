@@ -340,6 +340,11 @@ namespace net.redeemertech.Security
 
             foreach ( var userLogin in userLogins )
             {
+                if ( IISAlertAccountProtection.IsRockAdministrator( rockContext, userLogin.PersonId ) )
+                {
+                    continue;
+                }
+
                 userLogin.IsLockedOut = true;
                 userLogin.LastLockedOutDateTime = now;
             }

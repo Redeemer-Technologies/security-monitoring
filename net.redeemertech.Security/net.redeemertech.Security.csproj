@@ -107,9 +107,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="IISAlertBlockedIpCache.cs" />
+    <Compile Include="IISAlertAccountProtection.cs" />
     <Compile Include="IISAlertApiPostAuthenticationFilter.cs" />
+    <Compile Include="IISAlertExceptionLogger.cs" />
+    <Compile Include="IISAlertLocalRequestDetector.cs" />
     <Compile Include="IISAlertRequestRuleProcessor.cs" />
     <Compile Include="IISAlertRealtimeActionProcessor.cs" />
+    <Compile Include="IISAlertRuntime.cs" />
     <Compile Include="IISAlertRuleCache.cs" />
     <Compile Include="IISAlertBlockHttpModule.cs" />
     <Compile Include="IISAuthenticatedUserCache.cs" />

@@ -190,6 +190,8 @@
 
     const config = useConfigurationValues<IisAlertsInitializationBag>();
     const invokeBlockAction = useInvokeBlockAction();
+    const defaultLogQuerySummaryLava = "IIS alert returned {{ results | Size }} row(s).";
+    const defaultRealtimeSummaryLava = "Request denied from IP {{ Request.ClientIp }}";
     const alert = ref<IisAlertBag>(config.alert || createNewAlert());
     normalizeAlert();
     const savedAlert = ref<IisAlertBag | null>(alert.value.idKey ? cloneAlert(alert.value) : null);
@@ -297,6 +299,13 @@
         else if (mode === "LogQuery" && alert.value.evaluationFrequencyMinutes === 1) {
             alert.value.evaluationFrequencyMinutes = 60;
         }
+
+        if (mode === "RealTimeRule" && isDefaultLogQuerySummary(alert.value.summaryLava)) {
+            alert.value.summaryLava = defaultRealtimeSummaryLava;
+        }
+        else if (mode === "LogQuery" && isDefaultRealtimeSummary(alert.value.summaryLava)) {
+            alert.value.summaryLava = defaultLogQuerySummaryLava;
+        }
     });
 
     watch(() => alert.value.requestStage, stage => {
@@ -316,6 +325,7 @@
             requestStage: "PreAuthentication",
             conditionLogic: "All",
             conditions: [],
+            summaryLava: defaultLogQuerySummaryLava,
             evaluationFrequencyMinutes: 60,
             dateRange: config.defaultDateRange,
             blockRequest: false,
@@ -324,6 +334,14 @@
             blockIpAddressMinutes: 60,
             lockOutUserAccounts: false
         };
+    }
+
+    function isDefaultLogQuerySummary(value: string | null | undefined): boolean {
+        return !value || value === defaultLogQuerySummaryLava;
+    }
+
+    function isDefaultRealtimeSummary(value: string | null | undefined): boolean {
+        return !value || value === defaultRealtimeSummaryLava;
     }
 
     function normalizeAlert(): void {

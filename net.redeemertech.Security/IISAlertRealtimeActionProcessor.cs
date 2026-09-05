@@ -343,7 +343,7 @@ namespace net.redeemertech.Security
 
         internal static string ResolveSummary( IISAlertRealtimeEvent alertEvent )
         {
-            var template = alertEvent.SummaryLava.IfEmpty( "Real-time request rule matched." );
+            var template = alertEvent.SummaryLava.IfEmpty( "Request denied from IP {{ Request.ClientIp }}" );
             var mergeFields = new Dictionary<string, object>
             {
                 { "Request", alertEvent.Result },

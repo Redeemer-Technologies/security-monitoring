@@ -25,6 +25,7 @@ namespace net.redeemertech.Security.Blocks.Blocks
     {
         private const string DefaultQuery = "SELECT *\nFROM [[logs]]\nLIMIT 100";
         private const string DefaultSummaryLava = "IIS alert returned {{ results | Size }} row(s).";
+        private const string DefaultRealtimeSummaryLava = "Request denied from IP {{ Request.ClientIp }}";
         public override string ObsidianFileUrl => "/Plugins/net_redeemertech/Security/iisAlertDetail.obs";
 
         public override object GetObsidianBlockInitialization()
@@ -87,7 +88,8 @@ namespace net.redeemertech.Security.Blocks.Blocks
             alert.ConditionLogic = conditionLogic;
             alert.ConditionsJson = new JavaScriptSerializer().Serialize( conditions );
             alert.Query = bag.Query.IfEmpty( evaluationMode == IISAlertEvaluationMode.LogQuery ? null : string.Empty );
-            alert.SummaryLava = bag.SummaryLava;
+            alert.SummaryLava = bag.SummaryLava.IfEmpty(
+                evaluationMode == IISAlertEvaluationMode.RealTimeRule ? DefaultRealtimeSummaryLava : DefaultSummaryLava );
             alert.DateRange = IISLogDuckDbQuery.ToDelimitedDateRange(bag.DateRange).IfEmpty(IISLogDuckDbQuery.DefaultDateRange);
             alert.NotificationEmails = bag.NotificationEmails;
             alert.EvaluationFrequencyMinutes = bag.EvaluationFrequencyMinutes < 1 ? 1 : bag.EvaluationFrequencyMinutes;

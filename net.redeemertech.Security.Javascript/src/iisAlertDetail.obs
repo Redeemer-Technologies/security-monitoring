@@ -1,8 +1,10 @@
 <template>
     <div>
-        <NotificationBox v-if="errorMessage" :alertType="AlertType.Warning">{{ errorMessage }}</NotificationBox>
+        <NotificationBox v-if="blockError" :alertType="AlertType.Warning">{{ blockError }}</NotificationBox>
 
         <Panel v-else :title="alert.name || (isRealtime ? 'Real-time IIS Rule' : 'IIS Alert Detail')">
+            <NotificationBox v-if="errorMessage" :alertType="AlertType.Danger">{{ errorMessage }}</NotificationBox>
+
             <template v-if="!isEditMode">
                 <dl class="dl-horizontal">
                     <dt>Description</dt><dd>{{ alert.description || '' }}</dd>
@@ -39,32 +41,34 @@
                 <RockButton v-if="isEditable" btnType="primary" @click="edit">Edit</RockButton>
             </template>
 
-            <template v-else>
-                <TextBox v-model="alert.name" label="Name" />
+            <RockForm v-else :formResetKey="formResetKey" @submit="save">
+                <TextBox v-model="alert.name" label="Name" rules="required" />
                 <TextBox v-model="alert.description" label="Description" textMode="multiline" :rows="3" />
                 <CheckBox v-model="alert.isActive" label="Active" />
-                <DropDownList v-model="alert.evaluationMode"
-                              label="Type"
-                              :items="evaluationModeItems"
-                              :showBlankItem="false" />
+                <RadioButtonList v-model="alert.evaluationMode"
+                                 label="Type"
+                                 :items="evaluationModeItems"
+                                 horizontal />
 
                 <template v-if="!isRealtime">
                     <h4>Historical Query</h4>
-                    <CodeEditor v-model="alert.query" label="SQL Query" help="Use [[logs]] in the FROM clause as the IIS log parquet source." mode="sql" :rows="12" />
+                    <CodeEditor v-model="alert.query" label="SQL Query" help="Use [[logs]] in the FROM clause as the IIS log parquet source." mode="sql" :rows="12" rules="required" />
                     <SlidingDateRangePicker v-model="alert.dateRange" label="Date Range" help="Only parquet files whose filename date stamp falls within this range will be included." previewLocation="Right" />
                 </template>
 
                 <template v-else>
                     <h4>Request Processing</h4>
-                    <DropDownList v-model="alert.requestStage"
-                                  label="Processing Stage"
-                                  help="Before authentication has no user principal. After authentication runs after Forms authentication for web requests and after Rock API-key, JWT, or OIDC authentication for API requests. End of request also includes response fields, but cannot block the completed current request."
-                                  :items="requestStageItems"
-                                  :showBlankItem="false" />
+                    <RadioButtonList v-model="alert.requestStage"
+                                     label="Processing Stage"
+                                     help="Before authentication has no user principal. After authentication runs after Forms authentication for web requests and after Rock API-key, JWT, or OIDC authentication for API requests. End of request also includes response fields, but cannot block the completed current request."
+                                     :items="requestStageItems"
+                                     horizontal />
                     <DropDownList v-model="alert.conditionLogic"
                                   label="Condition Logic"
+                                  validationTitle="Conditions"
                                   :items="conditionLogicItems"
-                                  :showBlankItem="false" />
+                                  :showBlankItem="false"
+                                  :rules="[requireConditions]" />
 
                     <h4>Conditions</h4>
                     <NotificationBox v-if="!(alert.conditions || []).length" :alertType="AlertType.Info">
@@ -82,17 +86,19 @@
                                               label="Field"
                                               :items="fieldItemsFor(condition)"
                                               @update:modelValue="onConditionFieldChanged(condition, $event)"
-                                              :showBlankItem="false" />
+                                              :showBlankItem="false"
+                                              :rules="[requireAvailableField]" />
                             </div>
                             <div v-if="condition.field === 'RequestHeader' || condition.field === 'ResponseHeader'" class="col-md-3">
-                                <TextBox v-model="condition.headerName" label="Header Name" placeholder="X-Forwarded-For" />
+                                <TextBox v-model="condition.headerName" label="Header Name" placeholder="X-Forwarded-For" rules="required" />
                             </div>
                             <div class="col-md-3">
                                 <DropDownList v-model="condition.operator"
                                               label="Operator"
                                               :items="operatorItemsFor(condition)"
                                               :showBlankItem="true"
-                                              blankValue="" />
+                                              blankValue=""
+                                              rules="required" />
                             </div>
                             <div v-if="conditionNeedsValue(condition)" class="col-md-3">
                                 <DropDownList v-if="condition.field === 'SecurityRole'"
@@ -100,11 +106,13 @@
                                               label="Security Role"
                                               :items="securityRoleItems"
                                               :showBlankItem="true"
-                                              blankValue="" />
+                                              blankValue=""
+                                              rules="required" />
                                 <TextBox v-else
                                          v-model="condition.value"
                                          :label="condition.operator === 'Regex' ? 'Regular Expression' : 'Value'"
-                                         :help="condition.operator === 'Regex' ? 'Regular expressions use a 5 ms timeout and accept inputs up to 16,384 characters. Longer inputs and timed-out matches do not match the condition. Other operators compare the complete input.' : undefined" />
+                                         :help="condition.operator === 'Regex' ? 'Regular expressions use a 5 ms timeout and accept inputs up to 16,384 characters. Longer inputs and timed-out matches do not match the condition. Other operators compare the complete input.' : undefined"
+                                         :rules="conditionValueRules(condition)" />
                             </div>
                         </div>
                         <CheckBox v-if="conditionUsesTextComparison(condition)"
@@ -129,7 +137,8 @@
                 <NumberBox v-model="alert.evaluationFrequencyMinutes"
                            :label="isRealtime ? 'Alert Cooldown Minutes' : 'Evaluate Every Minutes'"
                            :help="isRealtime ? 'History and notifications run once per rule version during this interval; the next notification reports suppressed matches. Every matching request is blocked when enabled. Each distinct IP and account is enforced independently, with retries after failed enforcement.' : undefined"
-                           :minimumValue="1" />
+                           :minimumValue="1"
+                           rules="required" />
 
                 <h4>Response Actions</h4>
                 <CheckBox v-if="isRealtime && alert.requestStage !== 'EndRequest'"
@@ -137,21 +146,23 @@
                           label="Block Current Request"
                           help="Stops the request before its handler executes and returns the configured response." />
                 <template v-if="isRealtime && alert.requestStage !== 'EndRequest' && alert.blockRequest">
-                    <NumberBox v-model="alert.blockResponseStatusCode" label="Response Status Code" :minimumValue="400" :maximumValue="599" />
+                    <NumberBox v-model="alert.blockResponseStatusCode" label="Response Status Code" :minimumValue="400" :maximumValue="599" rules="required" />
                     <TextBox v-model="alert.blockResponseMessage" label="Response Message" textMode="multiline" :rows="3" />
                 </template>
                 <CheckBox v-model="alert.blockIpAddress"
                           label="Block IP Addresses"
                           :help="isRealtime ? 'Adds the matching request client IP to the existing block list. Subsequent requests are rejected at BeginRequest.' : 'When enabled, the alert query must return a BlockedIpAddress column. The c-ip column is also accepted.'" />
-                <NumberBox v-if="alert.blockIpAddress" v-model="alert.blockIpAddressMinutes" label="Block IP for Minutes" :minimumValue="1" />
+                <NumberBox v-if="alert.blockIpAddress" v-model="alert.blockIpAddressMinutes" label="Block IP for Minutes" :minimumValue="1" rules="required" />
                 <CheckBox v-if="!isRealtime || alert.requestStage !== 'PreAuthentication'"
                           v-model="alert.lockOutUserAccounts"
                           label="Lock Out User Accounts"
                           :help="isRealtime ? 'Locks the authenticated username captured by the rule.' : 'When enabled, the alert query must return a UserLoginId, UserName, or cs-username column.'" />
 
-                <RockButton btnType="primary" :disabled="isSaving" @click="save">Save</RockButton>
-                <RockButton v-if="savedAlert" :disabled="isSaving" @click="cancel">Cancel</RockButton>
-            </template>
+                <div class="actions">
+                    <RockButton type="submit" btnType="primary" :disabled="isSaving">Save</RockButton>
+                    <RockButton v-if="savedAlert" :disabled="isSaving" @click="cancel">Cancel</RockButton>
+                </div>
+            </RockForm>
         </Panel>
     </div>
 </template>
@@ -164,9 +175,12 @@
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
     import NumberBox from "@Obsidian/Controls/numberBox.obs";
     import Panel from "@Obsidian/Controls/panel.obs";
+    import RadioButtonList from "@Obsidian/Controls/radioButtonList.obs";
     import RockButton from "@Obsidian/Controls/rockButton.obs";
+    import RockForm from "@Obsidian/Controls/rockForm.obs";
     import SlidingDateRangePicker from "@Obsidian/Controls/slidingDateRangePicker.obs";
     import TextBox from "@Obsidian/Controls/textBox.obs";
+    import { ValidationRule } from "@Obsidian/ValidationRules";
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
     import { ListItemBag } from "@Obsidian/ViewModels/Utility/listItemBag";
@@ -179,7 +193,9 @@
     const alert = ref<IisAlertBag>(config.alert || createNewAlert());
     normalizeAlert();
     const savedAlert = ref<IisAlertBag | null>(alert.value.idKey ? cloneAlert(alert.value) : null);
-    const errorMessage = ref(config.errorMessage ?? "");
+    const blockError = ref(config.errorMessage ?? "");
+    const errorMessage = ref("");
+    const formResetKey = ref("0");
     const isEditable = config.isEditable;
     const isEditMode = ref(isEditable && !alert.value.idKey);
     const isSaving = ref(false);
@@ -325,6 +341,48 @@
         return condition.operator !== "Exists" && condition.operator !== "DoesNotExist";
     }
 
+    function requireConditions(): true | string {
+        return (alert.value.conditions || []).length > 0 || "must include at least one condition";
+    }
+
+    function requireAvailableField(value: unknown): true | string {
+        const field = Array.isArray(value) ? value[0] : value;
+        if (typeof field !== "string" || !field || availableFieldItems.value.some(item => item.value === field)) {
+            return true;
+        }
+
+        return `is not available at ${stageLabel(alert.value.requestStage)}`;
+    }
+
+    function conditionValueRules(condition: IisAlertConditionBag): ValidationRule[] {
+        if (!conditionNeedsValue(condition)) {
+            return [];
+        }
+
+        const rules: ValidationRule[] = ["required"];
+        if (["GreaterThan", "GreaterThanOrEqual", "LessThan", "LessThanOrEqual"].includes(condition.operator || "")) {
+            rules.push("number");
+        }
+
+        if (condition.operator === "Regex") {
+            rules.push((value: unknown): true | string => {
+                if (typeof value !== "string" || value === "") {
+                    return true;
+                }
+
+                try {
+                    new RegExp(value);
+                    return true;
+                }
+                catch {
+                    return "is not a valid regular expression";
+                }
+            });
+        }
+
+        return rules;
+    }
+
     function operatorItemsFor(condition: IisAlertConditionBag): ListItemBag[] {
         return condition.field === "SecurityRole" ? securityRoleOperatorItems : textOperatorItems;
     }
@@ -376,6 +434,8 @@
     }
 
     function edit(): void {
+        errorMessage.value = "";
+        formResetKey.value = Date.now().toString();
         isEditMode.value = true;
     }
 
@@ -383,6 +443,7 @@
         if (savedAlert.value) {
             alert.value = cloneAlert(savedAlert.value);
             normalizeAlert();
+            errorMessage.value = "";
             isEditMode.value = false;
         }
     }

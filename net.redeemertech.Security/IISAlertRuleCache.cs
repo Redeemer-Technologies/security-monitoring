@@ -46,8 +46,6 @@ namespace net.redeemertech.Security
 
         public bool LockOutUserAccounts { get; private set; }
 
-        public bool RequiresResponseBytes { get; private set; }
-
         private IReadOnlyList<IISRequestRuleCondition> Conditions { get; set; }
 
         public IReadOnlyList<IISRequestRuleConditionMatcher> ConditionMatchers { get; private set; }
@@ -109,7 +107,6 @@ namespace net.redeemertech.Security
             Conditions = new ReadOnlyCollection<IISRequestRuleCondition>( conditionCopies );
             ConditionMatchers = new ReadOnlyCollection<IISRequestRuleConditionMatcher>(
                 ( conditionMatchers ?? Enumerable.Empty<IISRequestRuleConditionMatcher>() ).ToList() );
-            RequiresResponseBytes = conditionCopies.Any( condition => string.Equals( condition.Field, IISRequestRuleField.ResponseBytes, StringComparison.OrdinalIgnoreCase ) );
             Version = ComputeVersion();
         }
 
@@ -189,7 +186,6 @@ namespace net.redeemertech.Security
             _endRequestRules = AsReadOnly( ruleList.Where( rule => rule.Stage == IISRequestRuleStage.EndRequest ) );
 
             HasActiveRules = ruleList.Count > 0;
-            RequiresResponseByteCounting = _endRequestRules.Any( rule => rule.RequiresResponseBytes );
             HasPostAuthenticationRules = _postAuthenticationRules.Count > 0;
             HasEndRequestRules = _endRequestRules.Count > 0;
             HasSecurityRoleConditions = ruleList.Any( rule => rule.HasSecurityRoleCondition );
@@ -199,8 +195,6 @@ namespace net.redeemertech.Security
         }
 
         public bool HasActiveRules { get; private set; }
-
-        public bool RequiresResponseByteCounting { get; private set; }
 
         public bool HasPostAuthenticationRules { get; private set; }
 
@@ -214,11 +208,9 @@ namespace net.redeemertech.Security
 
         public IReadOnlyList<string> LoadDiagnostics { get; private set; }
 
-        internal List<IISRealtimeRule> GetMatchingRules( IISRequestRuleStage stage, IISRequestRuleSnapshot snapshot, bool? requiresResponseBytes = null )
+        internal List<IISRealtimeRule> GetMatchingRules( IISRequestRuleStage stage, IISRequestRuleSnapshot snapshot )
         {
-            return GetRules( stage ).Where( rule =>
-                ( !requiresResponseBytes.HasValue || rule.RequiresResponseBytes == requiresResponseBytes.Value )
-                && rule.IsMatch( snapshot ) ).ToList();
+            return GetRules( stage ).Where( rule => rule.IsMatch( snapshot ) ).ToList();
         }
 
         private IReadOnlyList<IISRealtimeRule> GetRules( IISRequestRuleStage stage )
@@ -255,10 +247,6 @@ namespace net.redeemertech.Security
         private readonly Dictionary<string, string> _responseHeaders = new Dictionary<string, string>( StringComparer.OrdinalIgnoreCase );
 
         public DateTime StartedDateTimeUtc { get; set; }
-
-        public long ResponseBytes { get; set; }
-
-        public bool ResponseBytesAvailable { get; set; }
 
         public Guid? PersonGuid { get; private set; }
 
@@ -341,8 +329,6 @@ namespace net.redeemertech.Security
             var clone = new IISRequestRuleSnapshot
             {
                 StartedDateTimeUtc = StartedDateTimeUtc,
-                ResponseBytes = ResponseBytes,
-                ResponseBytesAvailable = ResponseBytesAvailable,
                 PersonGuid = PersonGuid,
                 IdentityResolved = IdentityResolved
             };
@@ -387,14 +373,6 @@ namespace net.redeemertech.Security
             get
             {
                 return Capture().HasActiveRules;
-            }
-        }
-
-        public static bool RequiresResponseByteCounting
-        {
-            get
-            {
-                return Capture().RequiresResponseByteCounting;
             }
         }
 
@@ -446,9 +424,9 @@ namespace net.redeemertech.Security
             }
         }
 
-        internal static List<IISRealtimeRule> GetMatchingRules( IISRequestRuleStage stage, IISRequestRuleSnapshot snapshot, bool? requiresResponseBytes = null )
+        internal static List<IISRealtimeRule> GetMatchingRules( IISRequestRuleStage stage, IISRequestRuleSnapshot snapshot )
         {
-            return Capture().GetMatchingRules( stage, snapshot, requiresResponseBytes );
+            return Capture().GetMatchingRules( stage, snapshot );
         }
 
         internal static IISAlertRuleConfiguration Capture()

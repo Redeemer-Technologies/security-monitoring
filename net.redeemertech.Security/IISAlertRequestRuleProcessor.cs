@@ -29,14 +29,14 @@ namespace net.redeemertech.Security
         private static int _enforcementCleanupCounter;
         internal static Func<DateTime> CurrentDateTime = () => RockDateTime.Now;
 
-        public static IISRequestBlockResult Process( IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage, bool? requiresResponseBytes = null )
+        public static IISRequestBlockResult Process( IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
         {
-            return Process( IISAlertRuleCache.Capture(), snapshot, stage, requiresResponseBytes );
+            return Process( IISAlertRuleCache.Capture(), snapshot, stage );
         }
 
-        public static IISRequestBlockResult Process( IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage, bool? requiresResponseBytes = null )
+        public static IISRequestBlockResult Process( IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
         {
-            var matchingRules = configuration.GetMatchingRules( stage, snapshot, requiresResponseBytes );
+            var matchingRules = configuration.GetMatchingRules( stage, snapshot );
             IISRealtimeRule blockingRule = null;
             var matchedDateTime = CurrentDateTime();
 

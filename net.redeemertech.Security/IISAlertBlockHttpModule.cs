@@ -7,7 +7,6 @@ using Rock.Web.HttpModules;
 using System;
 using System.ComponentModel;
 using System.ComponentModel.Composition;
-using System.Globalization;
 using System.Security.Principal;
 using System.Threading;
 using System.Web;
@@ -23,10 +22,7 @@ namespace net.redeemertech.Security
         internal const string SnapshotContextKey = "__RedeemertechIISRequestRuleSnapshot__";
         internal const string ConfigurationContextKey = "__RedeemertechIISRequestRuleConfiguration__";
         private const string PostAuthenticationProcessedContextKey = "__RedeemertechIISPostAuthenticationRuleProcessed__";
-        private const string ResponseCounterContextKey = "__RedeemertechIISResponseByteCounter__";
         private const string RequestBlockedContextKey = "__RedeemertechIISRequestBlocked__";
-        private const string EndRequestReadyContextKey = "__RedeemertechIISEndRequestRuleReady__";
-        private const string EndRequestProcessedContextKey = "__RedeemertechIISEndRequestRuleProcessed__";
 
         public override bool IsActive => true;
 
@@ -41,7 +37,6 @@ namespace net.redeemertech.Security
             context.BeginRequest += Application_BeginRequest;
             context.PostAuthenticateRequest += Application_PostAuthenticateRequest;
             context.EndRequest += Application_EndRequest;
-            context.PreSendRequestContent += Application_PreSendRequestContent;
         }
 
         private void Application_BeginRequest( object sender, EventArgs e )
@@ -69,21 +64,6 @@ namespace net.redeemertech.Security
 
             var snapshot = CreateSnapshot( context, ipAddress, configuration );
             context.Items[SnapshotContextKey] = snapshot;
-
-            if ( configuration.RequiresResponseByteCounting && context.Response.Filter != null )
-            {
-                try
-                {
-                    var counter = new ResponseByteCountingStream( context.Response.Filter );
-                    context.Response.Filter = counter;
-                    context.Items[ResponseCounterContextKey] = counter;
-                }
-                catch ( HttpException )
-                {
-                    // Some response types do not support managed entity-body filtering.
-                    // A Content-Length header can still provide the value at the end of the request.
-                }
-            }
 
             ProcessRules( context, configuration, snapshot, IISRequestRuleStage.PreAuthentication );
         }
@@ -137,68 +117,7 @@ namespace net.redeemertech.Security
                 snapshot.SetResponseHeader( headerName, context.Response.Headers[headerName] );
             }
 
-            ProcessRules( context, configuration, snapshot, IISRequestRuleStage.EndRequest, false );
-
-            if ( configuration.RequiresResponseByteCounting )
-            {
-                // Buffered ASP.NET output may not pass through Response.Filter until the final
-                // response flush, which happens after EndRequest. Mark the snapshot ready and
-                // evaluate it from PreSendRequestContent after the byte counter has seen the body.
-                context.Items[EndRequestReadyContextKey] = true;
-                return;
-            }
-        }
-
-        private void Application_PreSendRequestContent( object sender, EventArgs e )
-        {
-            var application = sender as HttpApplication;
-            var context = application?.Context;
-            if ( context != null && HttpRuntime.UsingIntegratedPipeline
-                && !( context.Items[EndRequestReadyContextKey] is bool ) )
-            {
-                ( context.Items[ResponseCounterContextKey] as ResponseByteCountingStream )?.IgnoreNextFilteringPass();
-            }
-
-            if ( context == null
-                || IsRequestBlocked( context )
-                || !( context.Items[EndRequestReadyContextKey] is bool )
-                || !( bool ) context.Items[EndRequestReadyContextKey]
-                || ( context.Items[EndRequestProcessedContextKey] is bool && ( bool ) context.Items[EndRequestProcessedContextKey] ) )
-            {
-                return;
-            }
-
-            var snapshot = context.Items[SnapshotContextKey] as IISRequestRuleSnapshot;
-            var configuration = context.Items[ConfigurationContextKey] as IISAlertRuleConfiguration;
-            if ( snapshot == null || configuration == null )
-            {
-                return;
-            }
-
-            SetResponseBytes( context, snapshot );
-            ProcessRules( context, configuration, snapshot, IISRequestRuleStage.EndRequest, true );
-            context.Items[EndRequestProcessedContextKey] = true;
-        }
-
-        private static void SetResponseBytes( HttpContext context, IISRequestRuleSnapshot snapshot )
-        {
-            var counter = context.Items[ResponseCounterContextKey] as ResponseByteCountingStream;
-            if ( counter != null )
-            {
-                snapshot.ResponseBytes = counter.BytesWritten;
-                snapshot.ResponseBytesAvailable = true;
-            }
-            else
-            {
-                long contentLength;
-                if ( long.TryParse( context.Response.Headers["Content-Length"], NumberStyles.Integer, CultureInfo.InvariantCulture, out contentLength ) )
-                {
-                    snapshot.ResponseBytes = contentLength;
-                    snapshot.ResponseBytesAvailable = true;
-                }
-            }
-
-            snapshot.SetValue( IISRequestRuleField.ResponseBytes, snapshot.ResponseBytesAvailable ? snapshot.ResponseBytes.ToString( CultureInfo.InvariantCulture ) : string.Empty );
+            ProcessRules( context, configuration, snapshot, IISRequestRuleStage.EndRequest );
         }
 
         internal static IISRequestRuleSnapshot CreateSnapshot( HttpContext context, string ipAddress )
@@ -262,9 +181,9 @@ namespace net.redeemertech.Security
             snapshot.SetIdentity( isAuthenticated, userName, personGuid );
         }
 
-        private static void ProcessRules( HttpContext context, IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage, bool? requiresResponseBytes = null )
+        private static void ProcessRules( HttpContext context, IISAlertRuleConfiguration configuration, IISRequestRuleSnapshot snapshot, IISRequestRuleStage stage )
         {
-            var blockResult = IISAlertRequestRuleProcessor.Process( configuration, snapshot, stage, requiresResponseBytes );
+            var blockResult = IISAlertRequestRuleProcessor.Process( configuration, snapshot, stage );
             if ( blockResult != null )
             {
                 BlockRequest( context, context.ApplicationInstance, blockResult.StatusCode, blockResult.Message );

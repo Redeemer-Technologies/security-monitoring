@@ -45,7 +45,6 @@ namespace net.redeemertech.Security.Model
         public const string ResponseSubStatusCode = "ResponseSubStatusCode";
         public const string ResponseContentType = "ResponseContentType";
         public const string ResponseHeader = "ResponseHeader";
-        public const string ResponseBytes = "ResponseBytes";
         public const string DurationMilliseconds = "DurationMilliseconds";
 
         private static readonly HashSet<string> PreAuthenticationFields = new HashSet<string>( StringComparer.OrdinalIgnoreCase )
@@ -76,7 +75,6 @@ namespace net.redeemertech.Security.Model
             ResponseSubStatusCode,
             ResponseContentType,
             ResponseHeader,
-            ResponseBytes,
             DurationMilliseconds
         };
 

@@ -72,7 +72,7 @@
                     </NotificationBox>
                     <NotificationBox v-if="incompatibleConditionMessages.length" :alertType="AlertType.Warning">
                         <div v-for="message in incompatibleConditionMessages" :key="message">{{ message }}</div>
-                        Change the highlighted conditions or restore a processing stage where those fields are available before saving.
+                        Change or remove the highlighted conditions before saving.
                     </NotificationBox>
 
                     <div v-for="(condition, index) in alert.conditions || []" :key="index" class="well well-sm">
@@ -115,9 +115,6 @@
 
                     <RockButton @click="addCondition">Add Condition</RockButton>
 
-                    <NotificationBox v-if="alert.requestStage === 'EndRequest'" :alertType="AlertType.Info" class="mt-3">
-                        Response Bytes is measured by a managed response filter and can be enabled immediately. It represents bytes written by the Rock application, which may differ from compressed bytes sent on the wire. No IIS feature or server restart is required.
-                    </NotificationBox>
                 </template>
 
                 <h4>Summary</h4>
@@ -242,9 +239,11 @@
         { text: "Response Substatus Code", value: "ResponseSubStatusCode" },
         { text: "Response Content Type", value: "ResponseContentType" },
         { text: "Response Header", value: "ResponseHeader" },
-        { text: "Response Bytes", value: "ResponseBytes" },
         { text: "Duration Milliseconds", value: "DurationMilliseconds" }
     ];
+    const retiredFieldLabels: Record<string, string> = {
+        ResponseBytes: "Response Bytes"
+    };
 
     const isRealtime = computed((): boolean => alert.value.evaluationMode === "RealTimeRule");
     const securityRoleItems = config.securityRoles || [];
@@ -360,7 +359,10 @@
     }
 
     function fieldLabel(field: string | null | undefined): string {
-        return [...preAuthenticationFields, ...authenticationFields, ...responseFields].find(item => item.value === field)?.text || field || "Field";
+        return [...preAuthenticationFields, ...authenticationFields, ...responseFields].find(item => item.value === field)?.text
+            || retiredFieldLabels[field || ""]
+            || field
+            || "Field";
     }
 
     function conditionLabel(condition: IisAlertConditionBag): string {

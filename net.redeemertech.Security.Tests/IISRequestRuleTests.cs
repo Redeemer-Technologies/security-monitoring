@@ -4,9 +4,7 @@ using net.redeemertech.Security.Model;
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Threading;
 
 namespace net.redeemertech.Security.Tests
 {
@@ -36,10 +34,25 @@ namespace net.redeemertech.Security.Tests
             Assert.IsFalse( IISRequestRuleField.IsAvailable( IISRequestRuleField.SecurityRole, IISRequestRuleStage.PreAuthentication ) );
             Assert.IsTrue( IISRequestRuleField.IsAvailable( IISRequestRuleField.SecurityRole, IISRequestRuleStage.PostAuthentication ) );
             Assert.IsTrue( IISRequestRuleField.IsAvailable( IISRequestRuleField.SecurityRole, IISRequestRuleStage.EndRequest ) );
-            Assert.IsFalse( IISRequestRuleField.IsAvailable( IISRequestRuleField.ResponseBytes, IISRequestRuleStage.PostAuthentication ) );
-            Assert.IsTrue( IISRequestRuleField.IsAvailable( IISRequestRuleField.ResponseBytes, IISRequestRuleStage.EndRequest ) );
+            Assert.IsFalse( IISRequestRuleField.IsAvailable( "ResponseBytes", IISRequestRuleStage.EndRequest ) );
             Assert.IsFalse( IISRequestRuleField.IsAvailable( IISRequestRuleField.ResponseHeader, IISRequestRuleStage.PostAuthentication ) );
             Assert.IsTrue( IISRequestRuleField.IsAvailable( IISRequestRuleField.ResponseHeader, IISRequestRuleStage.EndRequest ) );
+        }
+
+        [TestMethod]
+        public void RetiredResponseBytesConditionIsRejected()
+        {
+            var condition = new IISRequestRuleCondition
+            {
+                Field = "ResponseBytes",
+                Operator = IISRequestRuleOperator.GreaterThan,
+                Value = "1024"
+            };
+
+            var validationMessage = IISRequestRuleConditionMatcher.Validate( condition, IISRequestRuleStage.EndRequest );
+
+            Assert.IsNotNull( validationMessage );
+            StringAssert.Contains( validationMessage, "not available" );
         }
 
         [TestMethod]
@@ -63,7 +76,7 @@ namespace net.redeemertech.Security.Tests
         {
             var condition = new IISRequestRuleCondition
             {
-                Field = IISRequestRuleField.ResponseBytes,
+                Field = IISRequestRuleField.RequestContentLength,
                 Operator = IISRequestRuleOperator.GreaterThanOrEqual,
                 Value = "1048576"
             };
@@ -130,7 +143,7 @@ namespace net.redeemertech.Security.Tests
                 null,
                 new IISRequestRuleCondition
                 {
-                    Field = IISRequestRuleField.ResponseBytes,
+                    Field = IISRequestRuleField.RequestContentLength,
                     Operator = IISRequestRuleOperator.GreaterThan,
                     Value = "many"
                 },
@@ -286,21 +299,6 @@ namespace net.redeemertech.Security.Tests
             Assert.IsNotNull( IISRequestRuleConditionMatcher.Validate( responseCondition, IISRequestRuleStage.PreAuthentication ) );
             Assert.IsNotNull( IISRequestRuleConditionMatcher.Validate( headerCondition, IISRequestRuleStage.PreAuthentication ) );
             Assert.IsNotNull( IISRequestRuleConditionMatcher.Validate( responseHeaderCondition, IISRequestRuleStage.EndRequest ) );
-        }
-
-        [TestMethod]
-        public void ResponseStreamCountsBytesWithoutChangingContent()
-        {
-            var innerStream = new MemoryStream();
-            var countingStream = new ResponseByteCountingStream( innerStream );
-            var first = new byte[] { 1, 2, 3 };
-            var second = new byte[] { 4, 5 };
-
-            countingStream.Write( first, 0, first.Length );
-            countingStream.WriteAsync( second, 0, second.Length, CancellationToken.None ).GetAwaiter().GetResult();
-
-            Assert.AreEqual( 5L, countingStream.BytesWritten );
-            CollectionAssert.AreEqual( new byte[] { 1, 2, 3, 4, 5 }, innerStream.ToArray() );
         }
 
         private static IISRealtimeRule CreateRule(

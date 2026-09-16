@@ -29,13 +29,14 @@ namespace net.redeemertech.Security.Blocks.Blocks
             "Rock.Rest.Controllers.CheckinController",
             "Rock.Rest.Controllers.FileBrowserController",
             "Rock.Rest.Controllers.MergeFieldsController",
-            "Rock.Rest.Controllers.PbxController",
-            "Rock.Rest.Controllers.BadgesController"
+            "Rock.Rest.Controllers.PbxController"
         };
 
         /// <summary>
-        /// Path prefixes (no leading slash, lower-case) that identify UI-used custom endpoints.
-        /// A path matches when it equals the prefix or continues with '/'.
+        /// Action-route prefixes (no leading slash, lower-case) that identify UI-used
+        /// custom endpoints. A path matches when it equals the prefix or continues with
+        /// '/' (route parameters). Do not list an entity controller root here; that
+        /// would also mark generated CRUD such as SetContext.
         /// </summary>
         private static readonly string[] PathPrefixes = new[]
         {
@@ -46,16 +47,29 @@ namespace net.redeemertech.Security.Blocks.Blocks
             "api/v2/utilities",
 
             // Shared WebForms controls.
-            "api/search",
             "api/utility/calculateslidingdaterange",
             "api/utility/getslidingdaterangetextvalue",
             "api/filebrowser/getfilethumbnail",
-            "api/mergefields",
+            "api/mergefields/getchildren",
             "api/pbx/originate",
-            "api/personallinks",
             "api/personallinkscontroller/getpersonallinksdata",
-            "api/badges",
-            "api/personbadges",
+            "api/personallinks/getpersonallinksdata",
+            "api/badges/ingroupoftype",
+            "api/badges/ingroupwithpurpose",
+            "api/badges/geofencinggroups",
+            "api/badges/weeksattendedinduration",
+            "api/badges/lastvisitonsite",
+            "api/badges/personaldevicesnumber",
+            "api/badges/familyattendance",
+            "api/badges/interactionsinrange",
+            "api/personbadges/ingroupoftype",
+            "api/personbadges/ingroupwithpurpose",
+            "api/personbadges/geofencinggroups",
+            "api/personbadges/weeksattendedinduration",
+            "api/personbadges/lastvisitonsite",
+            "api/personbadges/personaldevicesnumber",
+            "api/personbadges/familyattendance",
+            "api/personbadges/interactionsinrange",
             "api/categories/getchildren",
             "api/categories/getmetricchildren",
             "api/categories/getdataview",
@@ -82,16 +96,30 @@ namespace net.redeemertech.Security.Blocks.Blocks
             "api/metricvalues/getseriespartitionname",
             "api/attendanceoccurrences/getfuturegroupoccurrences",
             "api/attendanceoccurrences/creategroupoccurrence",
-            "api/attendances",
+            "api/attendances/getschedulerresources",
+            "api/attendances/getschedulerresource",
+            "api/attendances/getattendingschedulerresources",
+            "api/attendances/canscheduleperson",
+            "api/attendances/scheduledpersonaddpending",
+            "api/attendances/scheduledpersonaddconfirmed",
+            "api/attendances/scheduledpersonconfirm",
+            "api/attendances/scheduledpersondecline",
+            "api/attendances/scheduledpersonpending",
+            "api/attendances/scheduledpersonremove",
+            "api/attendances/scheduledpersonsendconfirmationcommunication",
+            "api/attendances/registerrsvprecipients",
             "api/mediaelements/watchinteraction",
             "api/assetstorageproviders/getchildren",
             "api/assetstorageproviders/getfolders",
             "api/assetstorageproviders/getfiles",
 
             // Core pages and administrative controls.
-            "api/blocks",
-            "api/checkin",
-            "api/contentchannelitemslugs",
+            "api/blocks/move",
+            "api/blocks/action",
+            "api/checkin/configuration",
+            "api/checkin/printsessionlabels",
+            "api/contentchannelitemslugs/savecontentslug",
+            "api/contentchannelitemslugs/getuniquecontentchannelslug",
             "api/groupmemberhistoricals/getgrouphistoricalsummary",
             "api/interactions/registerpageinteraction",
             "api/lava/rendertemplate",
@@ -103,18 +131,28 @@ namespace net.redeemertech.Security.Blocks.Blocks
             "api/connectionrequests/connectionboardrequestviewmodel",
             "api/connectionrequests/connectionboardstatusviewmodels",
             "api/connectionrequests/doesstatuschangecauseworkflows",
-            "api/groupmembers",
+            "api/groupmembers/getgroupplacementgroupmembers",
             "api/registrationregistrants/getgroupplacementregistrants",
             "api/registrationtemplateplacements/canplaceregistrant",
             "api/registrationtemplateplacements/detachplacementgroup"
         };
 
-        // Rock's UI calls these generated CRUD endpoints directly. Keep these
-        // method-scoped so unrelated actions on the same controllers are not
-        // classified as required by Rock.
-        private static readonly Dictionary<string, string[]> MethodPathPrefixes = new Dictionary<string, string[]>( StringComparer.OrdinalIgnoreCase )
+        // Rock's UI calls these generated CRUD endpoints directly. Match the
+        // RestAction path template exactly so sibling actions on the same
+        // controller (SetContext, OData GET, generic PUT/PATCH) stay excluded.
+        private static readonly Dictionary<string, string[]> MethodExactPaths = new Dictionary<string, string[]>( StringComparer.OrdinalIgnoreCase )
         {
-            { "DELETE", new[] { "api/connectionrequests", "api/groups" } }
+            { "GET", new[] { "api/blocks/{id}", "api/search", "api/mergefields/{id}" } },
+            { "POST", new[] { "api/groupmembers", "api/followings" } },
+            { "DELETE", new[]
+                {
+                    "api/blocks/{id}",
+                    "api/contentchannelitemslugs/{id}",
+                    "api/groupmembers/{id}",
+                    "api/connectionrequests/{id}",
+                    "api/groups/{id}"
+                }
+            }
         };
 
         public static bool IsNeededByRock( string controllerClassName, string method, string path )
@@ -141,8 +179,8 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 }
             }
 
-            if ( MethodPathPrefixes.TryGetValue( methodName, out var methodPrefixes )
-                && methodPrefixes.Any( prefix => PathEqualsOrIsChild( pathWithoutQuery, prefix ) ) )
+            if ( MethodExactPaths.TryGetValue( methodName, out var exactPaths )
+                && exactPaths.Any( exactPath => pathWithoutQuery == exactPath ) )
             {
                 return true;
             }
@@ -158,13 +196,11 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 return true;
             }
 
-            // Followings toggler: generated POST plus custom DELETE with entity keys.
-            if ( methodName == "POST" && pathWithoutQuery == "api/followings" )
-            {
-                return true;
-            }
-
-            if ( methodName == "DELETE" && pathWithoutQuery.StartsWith( "api/followings/", StringComparison.Ordinal ) )
+            // Followings toggler: custom DELETE with entity type + entity keys.
+            // Generated DELETE api/Followings/{id} is a single extra segment and is not used.
+            if ( methodName == "DELETE"
+                && pathWithoutQuery.StartsWith( "api/followings/", StringComparison.Ordinal )
+                && pathWithoutQuery.Count( c => c == '/' ) >= 3 )
             {
                 return true;
             }

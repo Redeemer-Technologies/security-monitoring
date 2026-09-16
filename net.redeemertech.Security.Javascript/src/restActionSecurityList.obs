@@ -116,13 +116,40 @@
                 </template>
             </Column>
         </Grid>
+
+        <Modal v-model="isProgressOpen" title="Securing REST Actions" cancelText="" :isCloseButtonHidden="true">
+            <p>{{ progressMessage }}</p>
+            <div class="secure-progress">
+                <div class="progress">
+                    <div class="progress-bar"
+                         role="progressbar"
+                         :aria-valuenow="progressPercent"
+                         aria-valuemin="0"
+                         aria-valuemax="100"
+                         :style="{ width: `${progressPercent}%` }">
+                        {{ completedCount }} / {{ totalCount }}
+                    </div>
+                </div>
+            </div>
+            <p v-if="currentActionLabel" class="text-muted">{{ currentActionLabel }}</p>
+            <ul v-if="progressErrors.length" class="secure-progress-errors">
+                <li v-for="error in progressErrors" :key="error">{{ error }}</li>
+            </ul>
+            <template #customButtons>
+                <RockButton btnType="link" :disabled="cancelRequested || completedCount === totalCount" @click="cancelSecuring">
+                    {{ cancelRequested ? "Cancelling..." : "Cancel" }}
+                </RockButton>
+            </template>
+        </Modal>
     </div>
 </template>
 
 <script setup lang="ts">
     import { computed, ref } from "vue";
     import Grid, { BooleanColumn, Column, NumberSkeletonCell, SelectColumn, TextSkeletonCell, booleanValueFilter, textValueFilter, pickExistingValueFilter } from "@Obsidian/Controls/grid";
+    import Modal from "@Obsidian/Controls/modal.obs";
     import NotificationBox from "@Obsidian/Controls/notificationBox.obs";
+    import RockButton from "@Obsidian/Controls/rockButton.obs";
     import { AlertType } from "@Obsidian/Enums/Controls/alertType";
     import { useConfigurationValues, useInvokeBlockAction } from "@Obsidian/Utility/block";
     import { showSecurity } from "@Obsidian/Utility/dialogs";
@@ -135,9 +162,24 @@
     const invokeBlockAction = useInvokeBlockAction();
     const errorMessage = ref(config.errorMessage ?? "");
     const gridDataSource = ref<Promise<GridDataBag>>();
+    const loadedActions = ref<RestActionSecurityBag[]>([]);
     const isSecuring = ref(false);
+    const isProgressOpen = ref(false);
+    const cancelRequested = ref(false);
+    const completedCount = ref(0);
+    const totalCount = ref(0);
+    const currentActionLabel = ref("");
+    const progressMessage = ref("");
+    const progressErrors = ref<string[]>([]);
     const actionMessage = ref("");
     const actionAlertType = ref(AlertType.Info);
+    const progressPercent = computed((): number => {
+        if (!totalCount.value) {
+            return 0;
+        }
+
+        return Math.round((completedCount.value / totalCount.value) * 100);
+    });
     const gridActions = computed((): GridAction[] => [{
         title: "Secure All",
         tooltip: "Secure selected insecure endpoints; skip secured and insecurable endpoints",
@@ -145,6 +187,37 @@
         disabled: isSecuring.value,
         handler: secureSelectedRows
     }]);
+
+    function cancelSecuring(): void {
+        cancelRequested.value = true;
+        progressMessage.value = "Cancelling after the current endpoint...";
+    }
+
+    function getActionLabel(idKey: string): string {
+        const action = loadedActions.value.find(row => row.idKey === idKey);
+        if (!action) {
+            return idKey;
+        }
+
+        return `${action.method} ${action.path}`;
+    }
+
+    function buildCompletionMessage(securedCount: number, skippedCount: number, failedCount: number, wasCancelled: boolean): string {
+        const parts = [
+            `Secured ${securedCount} endpoint(s).`,
+            `Skipped ${skippedCount} already secured or insecurable endpoint(s).`
+        ];
+
+        if (failedCount) {
+            parts.push(`Failed ${failedCount} endpoint(s).`);
+        }
+
+        if (wasCancelled) {
+            parts.push("Cancelled before all selected endpoints were processed.");
+        }
+
+        return parts.join(" ");
+    }
 
     async function secureSelectedRows(grid: IGridState): Promise<void> {
         if (isSecuring.value) {
@@ -160,15 +233,49 @@
         }
 
         isSecuring.value = true;
+        isProgressOpen.value = true;
+        cancelRequested.value = false;
+        completedCount.value = 0;
+        totalCount.value = idKeys.length;
+        currentActionLabel.value = "";
+        progressErrors.value = [];
+        progressMessage.value = "Starting...";
+
+        let securedCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+
         try {
-            const result = await invokeBlockAction<{ securedCount: number; skippedCount: number }>("SecureAll", { idKeys });
-            if (!result.isSuccess || !result.data) {
-                actionMessage.value = result.errorMessage || "Unable to secure the selected REST actions.";
-                return;
+            for (const idKey of idKeys) {
+                if (cancelRequested.value) {
+                    break;
+                }
+
+                currentActionLabel.value = getActionLabel(idKey);
+                progressMessage.value = `Securing ${completedCount.value + 1} of ${totalCount.value}...`;
+
+                const result = await invokeBlockAction<{ status?: string }>("SecureAction", { idKey });
+                if (!result.isSuccess) {
+                    failedCount++;
+                    progressErrors.value.push(`${currentActionLabel.value}: ${result.errorMessage || "Unable to secure this REST action."}`);
+                }
+                else if (result.data?.status === "Secured") {
+                    securedCount++;
+                }
+                else {
+                    skippedCount++;
+                }
+
+                completedCount.value++;
             }
 
-            actionAlertType.value = AlertType.Success;
-            actionMessage.value = `Secured ${result.data.securedCount} endpoint(s). Skipped ${result.data.skippedCount} already secured or insecurable endpoint(s).`;
+            currentActionLabel.value = "";
+            progressMessage.value = cancelRequested.value
+                ? "Cancelled. Refreshing list..."
+                : "Complete. Refreshing list...";
+
+            actionAlertType.value = failedCount ? AlertType.Warning : AlertType.Success;
+            actionMessage.value = buildCompletionMessage(securedCount, skippedCount, failedCount, cancelRequested.value);
             gridDataSource.value = loadActions();
             await gridDataSource.value;
         }
@@ -178,6 +285,8 @@
         }
         finally {
             isSecuring.value = false;
+            isProgressOpen.value = false;
+            cancelRequested.value = false;
         }
     }
 
@@ -191,6 +300,7 @@
         const result = await invokeBlockAction<RestActionSecurityBag[]>("GetActions");
 
         if (result.isSuccess && result.data) {
+            loadedActions.value = result.data;
             return { rows: result.data as Record<string, unknown>[] };
         }
 
@@ -217,3 +327,15 @@
         return row.reasons.join("\n");
     }
 </script>
+
+<style scoped>
+    .secure-progress .progress {
+        margin-bottom: 12px;
+    }
+
+    .secure-progress-errors {
+        margin-top: 12px;
+        max-height: 240px;
+        overflow: auto;
+    }
+</style>

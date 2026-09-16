@@ -45,7 +45,7 @@ namespace net.redeemertech.Security.Migrations
                 "REST Action Security",
                 "",
                 "89A7578D-F435-4997-BCFD-3FC7A6B25D3C",
-                "fa fa-lock" );
+                "fa fa-key ti ti-cloud-lock" );
 
             RockMigrationHelper.AddBlock(
                 true,

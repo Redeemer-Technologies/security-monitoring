@@ -92,94 +92,59 @@ namespace net.redeemertech.Security.Blocks.Blocks
         }
 
         [BlockAction]
-        public BlockActionResult SecureAll( List<string> idKeys )
+        public BlockActionResult SecureAction( string idKey )
         {
             if ( !CanView() )
             {
                 return ActionForbidden( "Not authorized to view REST action security." );
             }
 
-            if ( idKeys == null || !idKeys.Any() || idKeys.Any( string.IsNullOrWhiteSpace ) )
+            if ( string.IsNullOrWhiteSpace( idKey ) )
             {
-                return ActionBadRequest( "Select one or more REST actions to secure." );
+                return ActionBadRequest( "Select a REST action to secure." );
             }
 
-            var selectedKeys = new HashSet<string>( idKeys );
-            var selectedActions = new RestActionService( RockContext ).Queryable()
-                .Include( action => action.Controller )
-                .ToList()
-                .Where( action => selectedKeys.Contains( action.IdKey ) )
-                .ToList();
-
-            if ( selectedActions.Count != selectedKeys.Count )
+            var action = new RestActionService( RockContext ).Get( idKey, !PageCache.Layout.Site.DisablePredictableIds );
+            if ( action == null )
             {
-                return ActionBadRequest( "One or more selected REST actions no longer exist. Refresh the list and try again." );
+                return ActionBadRequest( "The selected REST action no longer exists. Refresh the list and try again." );
             }
+
+            RockContext.Entry( action ).Reference( a => a.Controller ).Load();
 
             var allAuthenticatedUser = new Person { Id = 0, Guid = Guid.Empty };
-            var actionsToSecure = selectedActions.Select( action =>
+            var supportedActions = GetSupportedSecurityActions( action );
+            var security = ToSecurityBag( action, allAuthenticatedUser, supportedActions );
+            if ( !RestActionSecurityPolicy.ShouldSecure( security.IsSecurable, security.IsSecured ) )
             {
-                var supportedActions = GetSupportedSecurityActions( action );
-                return new
-                {
-                    Action = action,
-                    SupportedActions = supportedActions,
-                    Security = ToSecurityBag( action, allAuthenticatedUser, supportedActions )
-                };
-            } ).Where( item => RestActionSecurityPolicy.ShouldSecure( item.Security.IsSecurable, item.Security.IsSecured ) ).ToList();
+                return ActionOk( new { Status = "Skipped" } );
+            }
 
             var allowedRoleIds = new List<int>();
-            if ( actionsToSecure.Any( item => item.Security.IsNeededByRock ) )
+            if ( security.IsNeededByRock )
             {
-                var roleGuids = new[]
-                {
-                    Rock.SystemGuid.Group.GROUP_STAFF_MEMBERS.AsGuid(),
-                    Rock.SystemGuid.Group.GROUP_STAFF_LIKE_MEMBERS.AsGuid(),
-                    Rock.SystemGuid.Group.GROUP_ADMINISTRATORS.AsGuid()
-                };
-                var securityRoleTypeId = GroupTypeCache.Get( Rock.SystemGuid.GroupType.GROUPTYPE_SECURITY_ROLE.AsGuid() ).Id;
-                var roles = new GroupService( RockContext ).Queryable()
-                    .Where( group => roleGuids.Contains( group.Guid ) && group.IsActive
-                        && ( group.IsSecurityRole || group.GroupTypeId == securityRoleTypeId ) )
-                    .ToList();
-
-                if ( roles.Count != roleGuids.Length )
+                allowedRoleIds = GetRockEndpointAllowedRoleIds();
+                if ( allowedRoleIds == null )
                 {
                     return ActionBadRequest( "Staff Workers, Staff Like Workers, and Rock Admins must all exist as active security roles before securing endpoints needed by Rock." );
                 }
-
-                allowedRoleIds = roleGuids.Select( guid => roles.Single( role => role.Guid == guid ).Id ).ToList();
             }
 
             var authService = new AuthService( RockContext );
-            foreach ( var item in actionsToSecure )
+            foreach ( var securityAction in supportedActions )
             {
-                foreach ( var securityAction in item.SupportedActions )
-                {
-                    var existingRules = authService.GetAuths( item.Action.TypeId, item.Action.Id, securityAction ).ToList();
-                    var rules = RestActionSecurityPolicy.PrependRules( item.Action.TypeId, item.Action.Id, securityAction,
-                        item.Security.IsNeededByRock ? allowedRoleIds : new List<int>(), existingRules );
-                    authService.AddRange( rules );
-                }
+                var existingRules = authService.GetAuths( action.TypeId, action.Id, securityAction ).ToList();
+                var rules = RestActionSecurityPolicy.PrependRules( action.TypeId, action.Id, securityAction, allowedRoleIds, existingRules );
+                authService.AddRange( rules );
             }
 
-            if ( actionsToSecure.Any() )
+            RockContext.SaveChanges();
+            foreach ( var securityAction in supportedActions )
             {
-                RockContext.SaveChanges();
-                foreach ( var item in actionsToSecure )
-                {
-                    foreach ( var securityAction in item.SupportedActions )
-                    {
-                        Authorization.RefreshAction( item.Action.TypeId, item.Action.Id, securityAction );
-                    }
-                }
+                Authorization.RefreshAction( action.TypeId, action.Id, securityAction );
             }
 
-            return ActionOk( new
-            {
-                SecuredCount = actionsToSecure.Count,
-                SkippedCount = selectedActions.Count - actionsToSecure.Count
-            } );
+            return ActionOk( new { Status = "Secured" } );
         }
 
         private List<RestActionSecurityBag> GetActionSecurityBags()
@@ -401,6 +366,28 @@ GROUP BY 1, 2, 3";
             public string Path { get; set; }
             public string Query { get; set; }
             public int Count { get; set; }
+        }
+
+        private List<int> GetRockEndpointAllowedRoleIds()
+        {
+            var roleGuids = new[]
+            {
+                Rock.SystemGuid.Group.GROUP_STAFF_MEMBERS.AsGuid(),
+                Rock.SystemGuid.Group.GROUP_STAFF_LIKE_MEMBERS.AsGuid(),
+                Rock.SystemGuid.Group.GROUP_ADMINISTRATORS.AsGuid()
+            };
+            var securityRoleTypeId = GroupTypeCache.Get( Rock.SystemGuid.GroupType.GROUPTYPE_SECURITY_ROLE.AsGuid() ).Id;
+            var roles = new GroupService( RockContext ).Queryable()
+                .Where( group => roleGuids.Contains( group.Guid ) && group.IsActive
+                    && ( group.IsSecurityRole || group.GroupTypeId == securityRoleTypeId ) )
+                .ToList();
+
+            if ( roles.Count != roleGuids.Length )
+            {
+                return null;
+            }
+
+            return roleGuids.Select( guid => roles.Single( role => role.Guid == guid ).Id ).ToList();
         }
 
         private bool CanView()

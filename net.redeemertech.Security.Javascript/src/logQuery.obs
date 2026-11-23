@@ -40,7 +40,7 @@
                   :title="gridTitle"
                   :exportTitle="gridTitle"
                   :isTitleHidden="isGridTitleHidden"
-                  keyField="uniqueKey"
+                  :keyField="GridFieldName.RowKey"
                   :liveUpdates="true"
                   @selectItem="onSelectItem">
                 <DynamicColumns :dynamicFields="dynamicFields"
@@ -126,6 +126,8 @@
     const chartLavaTemplateResultsHtml = computed((): string | undefined | null => chartLavaTemplateResults.value?.resultsHtml);
     const lavaTemplateResultsHtml = computed((): string | undefined | null => lavaTemplateResults.value?.resultsHtml);
 
+    const GridFieldName = { RowKey: "rowKey" } as const;
+
     const dynamicFields = computed((): (DynamicFieldDefinitionBag & { filter?: ColumnFilter, filterValue?: FilterValueFunction | string })[] => {
         return gridDefinition.value?.dynamicFields
             ?.filter((field: DynamicFieldDefinitionBag) => !!field.columnType)
@@ -192,7 +194,7 @@
             return;
         }
 
-        const row = gridData.value.rows?.find(r => getRowKey(r, "uniqueKey") === rowKey);
+        const row = gridData.value.rows?.find(r => getRowKey(r, GridFieldName.RowKey) === rowKey);
         if (!row) {
             return;
         }

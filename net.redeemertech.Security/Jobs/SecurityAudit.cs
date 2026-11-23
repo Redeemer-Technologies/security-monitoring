@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Data.SqlClient;
 using System.Data.Entity;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Web;
@@ -111,6 +112,7 @@ namespace net.redeemertech.Security
                 {
                     AuditSecurityPluginVersion( securityPluginVersionData ),
                     AuditDisablePredictableIds(),
+                    AuditEnableServerModelValidation(),
                     AuditAccountProtectionProfileSettings( rockContext ),
                     AuditPasswordRegularExpression(),
                     AuditDefaultEnabledLavaCommands(),
@@ -1812,6 +1814,63 @@ namespace net.redeemertech.Security
                     ? string.Empty
                     : "Enable DisablePredictableIds in Rock security settings to prevent predictable integer identifiers from being accepted."
             };
+        }
+
+        /// <summary>
+        /// Audits the Enable Server Model Validation Rock security setting when it is available on the current Rock instance.
+        /// </summary>
+        /// <returns>An audit check result.</returns>
+        private AuditCheckResult AuditEnableServerModelValidation()
+        {
+            const string enableServerModelValidationPropertyName = "EnableServerModelValidation";
+
+            var securitySettings = new SecuritySettingsService().SecuritySettings;
+            var enableServerModelValidation = TryGetSecuritySettingsBoolProperty( securitySettings, enableServerModelValidationPropertyName );
+
+            if ( !enableServerModelValidation.HasValue )
+            {
+                return new AuditCheckResult
+                {
+                    Name = "Enable Server Model Validation",
+                    IsPassing = true,
+                    Summary = "Enable Server Model Validation: This Rock instance does not expose the EnableServerModelValidation security setting.",
+                    Details = string.Empty
+                };
+            }
+
+            return new AuditCheckResult
+            {
+                Name = "Enable Server Model Validation",
+                IsPassing = enableServerModelValidation.Value,
+                Summary = enableServerModelValidation.Value
+                    ? "Enable Server Model Validation: Rock SecuritySettings EnableServerModelValidation is enabled."
+                    : "Enable Server Model Validation: Rock SecuritySettings EnableServerModelValidation is not enabled.",
+                Details = enableServerModelValidation.Value
+                    ? string.Empty
+                    : "Enable Enable Server Model Validation in Rock security settings. Rock must be restarted after changing this setting."
+            };
+        }
+
+        /// <summary>
+        /// Attempts to read a boolean Rock security setting property when it exists on the current Rock instance.
+        /// </summary>
+        /// <param name="securitySettings">The Rock security settings instance.</param>
+        /// <param name="propertyName">The name of the boolean property to read.</param>
+        /// <returns>The property value when it exists; otherwise <see langword="null"/>.</returns>
+        private bool? TryGetSecuritySettingsBoolProperty( object securitySettings, string propertyName )
+        {
+            if ( securitySettings == null || propertyName.IsNullOrWhiteSpace() )
+            {
+                return null;
+            }
+
+            var property = securitySettings.GetType().GetProperty( propertyName, BindingFlags.Instance | BindingFlags.Public );
+            if ( property == null || property.PropertyType != typeof( bool ) || !property.CanRead )
+            {
+                return null;
+            }
+
+            return ( bool ) property.GetValue( securitySettings );
         }
 
         private AuditCheckResult AuditPasswordRegularExpression()

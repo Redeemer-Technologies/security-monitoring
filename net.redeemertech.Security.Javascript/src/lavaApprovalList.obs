@@ -10,6 +10,8 @@
                itemTerm="Lava Script"
                tooltipField="contentPreview"
                stickyHeader
+               @onLoad="onGridLoad"
+               @filteredRowsChanged="onGridRowsChanged"
                @selectItem="openApproval">
             <SelectColumn v-if="isEditable" />
 
@@ -47,10 +49,11 @@
 
             <Column name="isPublic"
                     title="Public"
-                    sortValue="{{ row.isPublic ? '2' : row.isPublic === false ? '1' : '0' }}"
-                    filterValue="{{ row.isPublic ? 'Yes' : row.isPublic === false ? 'No' : 'Unknown' }}"
-                    quickFilterValue="{{ row.isPublic ? 'Yes' : row.isPublic === false ? 'No' : 'Unknown' }}"
+                    :sortValue="getPublicSortValue"
+                    :filterValue="getPublicFilterValue"
+                    :quickFilterValue="getPublicFilterValue"
                     :filter="pickExistingValueFilter"
+                    field="isPublic"
                     visiblePriority="sm"
                     width="8%">
                 <template #format="{ row }">
@@ -108,17 +111,17 @@
                     <dt>Source</dt>
                     <dd>{{ selectedSource.matchingSourceCount }} place{{ selectedSource.matchingSourceCount === 1 ? "" : "s" }}</dd>
                     <dt>Public</dt>
-                    <dd>{{ selectedSource.isPublic ? "Yes" : selectedSource.isPublic === false ? "No" : "Unknown" }}</dd>
+                    <dd>{{ selectedIsPublic ? "Yes" : selectedIsPublic === false ? "No" : "Unknown" }}</dd>
                     <dt>Content Hash</dt>
                     <dd><code>{{ selectedContentHash }}</code></dd>
                 </dl>
 
-                <NotificationBox v-if="selectedAIRiskAssessment == 'high'" :alertType="AlertType.Danger">
+                <NotificationBox v-if="selectedIsPublic && selectedAIRiskAssessment == 'high'" :alertType="AlertType.Danger">
                     <strong>High Risk:</strong>
                     This Lava content has been identified as high risk by AI review or raised because it is public. Exercise caution when approving or using this content.
                 </NotificationBox>
 
-                <NotificationBox v-if="selectedAIRiskAssessment == 'urgent'" :alertType="AlertType.Danger">
+                <NotificationBox v-if="selectedIsPublic && selectedAIRiskAssessment == 'urgent'" :alertType="AlertType.Danger">
                     <strong>Urgent Risk:</strong>
                     This Lava content is public and has been raised from high risk by AI review. Exercise caution when approving or using this content.
                 </NotificationBox>
@@ -168,10 +171,25 @@
                     </tbody>
                 </table>
 
-                <div class="approval-content">
+                <div ref="approvalContentElement" class="approval-content">
                     <pre v-if="selectedContent">{{ selectedContent }}</pre>
                     <p v-else class="text-muted">Loading content...</p>
                 </div>
+            </template>
+
+            <template #customButtons>
+                <RockButton btnType="default"
+                            class="pull-left"
+                            :disabled="!isPreviousApprovalEnabled"
+                            @click="openPreviousApproval">
+                    Previous
+                </RockButton>
+                <RockButton btnType="default"
+                            class="pull-left"
+                            :disabled="!isNextApprovalEnabled"
+                            @click="openNextApproval">
+                    Next
+                </RockButton>
             </template>
         </Modal>
 
@@ -226,6 +244,7 @@
     const selectedSource = ref<LavaApprovalBag | null>(null);
     const selectedAIReviewDetails = ref("");
     const selectedAIRiskAssessment = ref("");
+    const selectedIsPublic = ref<boolean | null>(null);
     const selectedAIHasConcerns = ref(false);
     const selectedAIReviewDateTime = ref("");
     const isModalOpen = ref(false);
@@ -239,7 +258,54 @@
     const aiReviewErrors = ref<string[]>([]);
     const isEditable = config.isEditable;
     const isAIReviewConfigured = config.isAIReviewConfigured;
+    const gridState = ref<IGridState | null>(null);
+    const gridRowVersion = ref(0);
+    const isContentLoading = ref(false);
+    const approvalContentElement = ref<HTMLElement | null>(null);
     const gridDataSource = computed((): Promise<GridDataBag> => Promise.resolve({ rows: sources.value as Record<string, unknown>[] }));
+    const navigableRowKeys = computed((): string[] => {
+        gridRowVersion.value;
+
+        const validIdKeys = new Set(
+            sources.value
+                .map(source => source.idKey)
+                .filter((key): key is string => !!key)
+        );
+        const state = gridState.value;
+        let keys: string[];
+
+        if (state) {
+            keys = state.sortedRows
+                .map(row => state.getRowKey(row))
+                .filter((key): key is string => !!key);
+        }
+        else {
+            keys = sources.value
+                .map(source => source.idKey)
+                .filter((key): key is string => !!key);
+        }
+
+        return keys.filter(key => validIdKeys.has(key));
+    });
+    const selectedApprovalIndex = computed((): number => {
+        gridRowVersion.value;
+
+        const idKey = selectedSource.value?.idKey;
+        if (!idKey) {
+            return -1;
+        }
+
+        return navigableRowKeys.value.indexOf(idKey);
+    });
+    const isPreviousApprovalEnabled = computed((): boolean => {
+        return !isContentLoading.value && selectedApprovalIndex.value > 0;
+    });
+    const isNextApprovalEnabled = computed((): boolean => {
+        const currentIndex = selectedApprovalIndex.value;
+        return !isContentLoading.value
+            && currentIndex >= 0
+            && currentIndex < navigableRowKeys.value.length - 1;
+    });
     const aiReviewProgressPercent = computed((): number => {
         if (!aiReviewTotalCount.value) {
             return 0;
@@ -304,6 +370,45 @@
         window.history.replaceState(window.history.state, "", url);
     }
 
+    /**
+     * Stores the grid state so approval navigation can follow the current grid order.
+     */
+    function onGridLoad(state: IGridState): void {
+        gridState.value = state;
+        gridRowVersion.value++;
+    }
+
+    /**
+     * Refreshes navigation when the grid's filtered or sorted rows change.
+     */
+    function onGridRowsChanged(): void {
+        gridRowVersion.value++;
+    }
+
+    /**
+     * Opens the previous Lava approval in the current grid order.
+     */
+    async function openPreviousApproval(): Promise<void> {
+        const previousIdKey = navigableRowKeys.value[selectedApprovalIndex.value - 1];
+        if (!previousIdKey) {
+            return;
+        }
+
+        await openApproval(previousIdKey);
+    }
+
+    /**
+     * Opens the next Lava approval in the current grid order.
+     */
+    async function openNextApproval(): Promise<void> {
+        const nextIdKey = navigableRowKeys.value[selectedApprovalIndex.value + 1];
+        if (!nextIdKey) {
+            return;
+        }
+
+        await openApproval(nextIdKey);
+    }
+
     async function openApproval(idKey: string | null | undefined): Promise<void> {
         const source = sources.value.find(s => s.idKey === idKey) ?? null;
         if (!idKey || !source) {
@@ -316,25 +421,38 @@
         selectedSources.value = [];
         selectedAIReviewDetails.value = source.aiReviewDetails ?? "";
         selectedAIRiskAssessment.value = source.aiRiskAssessment ?? "";
+        selectedIsPublic.value = normalizeNullableBoolean(source.isPublic);
         selectedAIHasConcerns.value = source.aiHasVulnerabilityConcerns === true;
         selectedAIReviewDateTime.value = source.aiReviewDateTime ?? "";
         modalErrorMessage.value = "";
         isModalOpen.value = true;
         setUrlHashParameter(source.contentHash ?? idKey);
+        isContentLoading.value = true;
 
-        const result = await invokeBlockAction("GetSourceContent", { contentHash: source.contentHash });
-        if (result.isSuccess && result.data) {
-            const data = result.data as LavaApprovalContentBag;
-            selectedContent.value = data.content ?? "";
-            selectedContentHash.value = data.contentHash ?? selectedContentHash.value;
-            selectedSources.value = data.sources ?? [];
-            selectedAIReviewDetails.value = data.aiReviewDetails ?? selectedAIReviewDetails.value;
-            selectedAIRiskAssessment.value = data.aiRiskAssessment ?? selectedAIRiskAssessment.value;
-            selectedAIHasConcerns.value = data.aiHasVulnerabilityConcerns === true;
-            selectedAIReviewDateTime.value = data.aiReviewDateTime ?? selectedAIReviewDateTime.value;
+        if (approvalContentElement.value) {
+            approvalContentElement.value.scrollTop = 0;
         }
-        else {
-            modalErrorMessage.value = result.errorMessage || "Unable to load Lava content.";
+
+        try {
+            const result = await invokeBlockAction("GetSourceContent", { contentHash: source.contentHash });
+
+            if (result.isSuccess && result.data) {
+                const data = result.data as LavaApprovalContentBag;
+                selectedContent.value = data.content ?? "";
+                selectedContentHash.value = data.contentHash ?? selectedContentHash.value;
+                selectedSources.value = (data.sources ?? []).map(normalizeSourcePublicFlag);
+                selectedAIReviewDetails.value = data.aiReviewDetails ?? selectedAIReviewDetails.value;
+                selectedAIRiskAssessment.value = data.aiRiskAssessment ?? selectedAIRiskAssessment.value;
+                selectedIsPublic.value = getModalIsPublic(data.isPublic, selectedSources.value);
+                selectedAIHasConcerns.value = data.aiHasVulnerabilityConcerns === true;
+                selectedAIReviewDateTime.value = data.aiReviewDateTime ?? selectedAIReviewDateTime.value;
+            }
+            else {
+                modalErrorMessage.value = result.errorMessage || "Unable to load Lava content.";
+            }
+        }
+        finally {
+            isContentLoading.value = false;
         }
     }
 
@@ -343,13 +461,96 @@
             return;
         }
 
+        const approvedIdKey = selectedSource.value.idKey;
+        const nextIdKey = navigableRowKeys.value[selectedApprovalIndex.value + 1] ?? null;
         const result = await invokeBlockAction("Approve", { contentHash: selectedContentHash.value, note: "" });
-        if (result.isSuccess) {
-            reloadBlock();
-        }
-        else {
+
+        if (!result.isSuccess) {
             modalErrorMessage.value = result.errorMessage || "Unable to approve Lava content.";
+            return;
         }
+
+        sources.value = sources.value.filter(source => source.idKey !== approvedIdKey);
+        gridRowVersion.value++;
+
+        if (nextIdKey) {
+            await openApproval(nextIdKey);
+            return;
+        }
+
+        isModalOpen.value = false;
+    }
+
+    function normalizeNullableBoolean(value: unknown): boolean | null {
+        if (value === true || value === "true" || value === "True") {
+            return true;
+        }
+
+        if (value === false || value === "false" || value === "False") {
+            return false;
+        }
+
+        return null;
+    }
+
+    /**
+     * Gets the display and filter label for the public status column.
+     */
+    function getPublicDisplayValue(isPublic: boolean | null): string {
+        if (isPublic === true) {
+            return "Public";
+        }
+
+        if (isPublic === false) {
+            return "No";
+        }
+
+        return "Unknown";
+    }
+
+    /**
+     * Gets the filter value for the public status column.
+     */
+    function getPublicFilterValue(row: Record<string, unknown>): string {
+        return getPublicDisplayValue(normalizeNullableBoolean(row.isPublic));
+    }
+
+    /**
+     * Gets the sort value for the public status column.
+     */
+    function getPublicSortValue(row: Record<string, unknown>): string {
+        const isPublic = normalizeNullableBoolean(row.isPublic);
+
+        if (isPublic === true) {
+            return "2";
+        }
+
+        if (isPublic === false) {
+            return "1";
+        }
+
+        return "0";
+    }
+
+    function normalizeSourcePublicFlag(source: LavaApprovalBag): LavaApprovalBag {
+        return {
+            ...source,
+            isPublic: normalizeNullableBoolean(source.isPublic)
+        };
+    }
+
+    function getModalIsPublic(summaryIsPublic: unknown, detailSources: LavaApprovalBag[]): boolean | null {
+        if (detailSources.length) {
+            if (detailSources.some(source => source.isPublic === true)) {
+                return true;
+            }
+
+            if (detailSources.every(source => source.isPublic === false)) {
+                return false;
+            }
+        }
+
+        return normalizeNullableBoolean(summaryIsPublic);
     }
 
     async function approveRow(idKey: string | null | undefined): Promise<void> {

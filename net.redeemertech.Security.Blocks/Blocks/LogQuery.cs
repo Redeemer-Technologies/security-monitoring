@@ -458,17 +458,9 @@ LIMIT 100";
                     result.GridResults = new GridResultsBag
                     {
                         GridDefinition = gridBuilder.BuildDefinition(),
-                        Title = GetAttributeValue( AttributeKey.GridTitle ),
-                        KeyField = "uniqueKey"
+                        Title = GetAttributeValue( AttributeKey.GridTitle )
                     };
                     result.GridData = loadRows ? gridBuilder.Build( dataTable.Rows.OfType<DataRow>() ) : null;
-                    if ( result.GridData?.Rows != null )
-                    {
-                        for ( var i = 0; i < result.GridData.Rows.Count; i++ )
-                        {
-                            result.GridData.Rows[i]["uniqueKey"] = i;
-                        }
-                    }
                 }
             }
             catch ( Exception ex )
@@ -610,7 +602,10 @@ LIMIT 100";
 
         private GridBuilder<DataRow> GetGridBuilder( LogQueryResults result )
         {
-            var gridBuilder = new GridBuilder<DataRow>().WithBlock( this );
+            var rowKey = 1;
+            var gridBuilder = new GridBuilder<DataRow>()
+                .WithBlock( this )
+                .AddField("rowKey", _ => rowKey++);
 
             foreach ( var columnConfiguration in result.ActualColumnConfigurations )
             {

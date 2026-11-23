@@ -154,6 +154,10 @@ namespace net.redeemertech.Security
         internal static IISRequestRuleSnapshot CreateSnapshot( HttpContext context, string ipAddress, IISAlertRuleConfiguration configuration )
         {
             var request = context.Request;
+            // Read raw values so markup in legitimate requests (e.g. Rock's connection board
+            // and universal search send HTML in the query string) cannot trigger ASP.NET
+            // request validation here; the application still validates on its own reads.
+            var unvalidated = request.Unvalidated;
             var snapshot = new IISRequestRuleSnapshot
             {
                 StartedDateTimeUtc = DateTime.UtcNow,
@@ -162,19 +166,19 @@ namespace net.redeemertech.Security
 
             snapshot.SetValue( IISRequestRuleField.ClientIp, ipAddress );
             snapshot.SetValue( IISRequestRuleField.HttpMethod, request.HttpMethod );
-            snapshot.SetValue( IISRequestRuleField.Host, request.Url?.Host ?? request.Headers["Host"] );
-            snapshot.SetValue( IISRequestRuleField.Path, request.Path );
-            snapshot.SetValue( IISRequestRuleField.RawUrl, request.RawUrl );
-            snapshot.SetValue( IISRequestRuleField.QueryString, request.QueryString?.ToString() );
+            snapshot.SetValue( IISRequestRuleField.Host, request.Url?.Host ?? unvalidated.Headers["Host"] );
+            snapshot.SetValue( IISRequestRuleField.Path, unvalidated.Path );
+            snapshot.SetValue( IISRequestRuleField.RawUrl, unvalidated.RawUrl );
+            snapshot.SetValue( IISRequestRuleField.QueryString, unvalidated.QueryString?.ToString() );
             snapshot.SetValue( IISRequestRuleField.UserAgent, request.UserAgent );
             // Preserve malformed referrers for rule evaluation without parsing untrusted input as a URI.
-            snapshot.SetValue( IISRequestRuleField.Referrer, request.Headers["Referer"] );
+            snapshot.SetValue( IISRequestRuleField.Referrer, unvalidated.Headers["Referer"] );
             snapshot.SetValue( IISRequestRuleField.RequestContentType, request.ContentType );
             snapshot.SetValue( IISRequestRuleField.RequestContentLength, request.ContentLength );
 
             foreach ( var headerName in configuration.RequiredHeaderNames )
             {
-                snapshot.SetHeader( headerName, request.Headers[headerName] );
+                snapshot.SetHeader( headerName, unvalidated.Headers[headerName] );
             }
 
             return snapshot;
@@ -251,7 +255,7 @@ namespace net.redeemertech.Security
                 return false;
             }
 
-            var path = request.AppRelativeCurrentExecutionFilePath ?? request.Path ?? string.Empty;
+            var path = request.AppRelativeCurrentExecutionFilePath ?? request.Unvalidated.Path ?? string.Empty;
             return string.Equals( path, "~/api", StringComparison.OrdinalIgnoreCase )
                 || path.StartsWith( "~/api/", StringComparison.OrdinalIgnoreCase )
                 || string.Equals( path, "/api", StringComparison.OrdinalIgnoreCase )

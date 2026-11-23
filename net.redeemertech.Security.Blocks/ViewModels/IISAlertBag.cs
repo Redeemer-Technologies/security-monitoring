@@ -20,6 +20,7 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public string NotificationEmails { get; set; }
         public int EvaluationFrequencyMinutes { get; set; }
         public string LastRunDateTime { get; set; }
+        public long MatchCount { get; set; }
         public bool BlockIpAddress { get; set; }
         public int? BlockIpAddressMinutes { get; set; }
         public bool LockOutUserAccounts { get; set; }
@@ -32,6 +33,11 @@ namespace net.redeemertech.Security.Blocks.ViewModels
         public string BlockResponseMessage { get; set; }
 
         public static IISAlertBag FromEntity(IISAlert alert)
+        {
+            return FromEntity( alert, 0 );
+        }
+
+        public static IISAlertBag FromEntity( IISAlert alert, long matchCount )
         {
             var conditions = new List<IISRequestRuleCondition>();
             try
@@ -57,6 +63,7 @@ namespace net.redeemertech.Security.Blocks.ViewModels
                     ? ( alert.EvaluationMode == IISAlertEvaluationMode.RealTimeRule ? 1 : 60 )
                     : alert.EvaluationFrequencyMinutes,
                 LastRunDateTime = alert.LastRunDateTime?.ToString("g"),
+                MatchCount = matchCount,
                 BlockIpAddress = alert.BlockIpAddress,
                 BlockIpAddressMinutes = alert.BlockIpAddressMinutes,
                 LockOutUserAccounts = alert.LockOutUserAccounts,

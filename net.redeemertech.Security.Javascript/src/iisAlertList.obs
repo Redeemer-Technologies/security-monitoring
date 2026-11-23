@@ -17,7 +17,7 @@
                     filterValue="{{ row.name }} {{ row.description }}"
                     quickFilterValue="{{ row.name }} {{ row.description }}"
                     :filter="textValueFilter"
-                    width="35%">
+                    width="25%">
                 <template #format="{ row }">
                     <strong>{{ row.name }}</strong>
                     <div class="text-muted">{{ row.description }}</div>
@@ -29,7 +29,7 @@
                     field="evaluationMode"
                     :filter="textValueFilter"
                     visiblePriority="xs"
-                    width="15%">
+                    width="13%">
                 <template #format="{ row }">
                     {{ row.evaluationMode === "RealTimeRule" ? "Real-time Rule" : "Log Query" }}
                 </template>
@@ -40,7 +40,7 @@
                     field="requestStage"
                     :filter="textValueFilter"
                     visiblePriority="sm"
-                    width="15%">
+                    width="12%">
                 <template #format="{ row }">
                     {{ row.evaluationMode === "RealTimeRule" ? formatStage(row.requestStage) : "Scheduled" }}
                 </template>
@@ -51,13 +51,19 @@
                            field="isActive"
                            :filter="booleanValueFilter"
                            visiblePriority="xs"
-                           width="10%" />
+                           width="8%" />
 
             <NumberColumn name="evaluationFrequencyMinutes"
                           title="Frequency Minutes"
                           field="evaluationFrequencyMinutes"
                           visiblePriority="sm"
-                          width="10%" />
+                          width="12%" />
+
+            <NumberColumn name="matchCount"
+                          title="Matches"
+                          field="matchCount"
+                          visiblePriority="xs"
+                          width="15%" />
 
             <TextColumn name="lastRunDateTime"
                         title="Last Run"

@@ -203,6 +203,24 @@ namespace net.redeemertech.Security.Tests
             }
         }
 
+        [TestMethod]
+        public void SnapshotCapturesMarkupInQueryStringWithoutTriggeringRequestValidation()
+        {
+            // Rock's connection board sends a Lava/HTML status icon template in the query string.
+            const string queryString = "statusIconsTemplate=%3Cdiv+class%3D%27board-card%27%3E%3C%2Fdiv%3E";
+            var request = new HttpRequest( string.Empty, "http://localhost/api/ConnectionRequests/ConnectionBoardStatusViewModels/1", queryString );
+            request.ValidateInput();
+            var context = new HttpContext( request, new HttpResponse( new StringWriter() ) );
+
+            Assert.ThrowsException<HttpRequestValidationException>(
+                () => request.QueryString.ToString(),
+                "The test request must have request validation enabled." );
+
+            var snapshot = IISAlertBlockHttpModule.CreateSnapshot( context, "127.0.0.1", CreateConfiguration( "X-Test", "value" ) );
+
+            StringAssert.Contains( snapshot.GetValue( IISRequestRuleField.QueryString ), "board-card" );
+        }
+
         private static IISAlertRuleConfiguration CreateConfiguration(
             string fieldOrHeader,
             string expectedValue,

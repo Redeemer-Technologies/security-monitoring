@@ -327,6 +327,7 @@
             conditions: [],
             summaryLava: defaultLogQuerySummaryLava,
             evaluationFrequencyMinutes: 60,
+            matchCount: 0,
             dateRange: config.defaultDateRange,
             blockRequest: false,
             blockResponseStatusCode: 403,

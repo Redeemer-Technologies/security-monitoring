@@ -29,15 +29,28 @@ namespace net.redeemertech.Security.Blocks.Blocks
                 return new IISAlertsInitializationBox { ErrorMessage = "Not authorized to view IIS alerts." };
             }
 
+            var alerts = new IISAlertService( RockContext )
+                .Queryable()
+                .OrderBy( a => a.Name )
+                .ToList();
+            var matchCounts = new IISAlertHistoryService( RockContext )
+                .Queryable()
+                .GroupBy( h => h.IISAlertId )
+                .Select( g => new
+                {
+                    IISAlertId = g.Key,
+                    MatchCount = g.Sum( h => ( long ) h.ResultCount )
+                } )
+                .ToDictionary( x => x.IISAlertId, x => x.MatchCount );
+
             return new IISAlertsInitializationBox
             {
                 IsEditable = CanEdit(),
                 DetailPageUrl = this.GetLinkedPageUrl( AttributeKey.DetailPage, "IISAlertId", "((IdKey))" ),
-                Alerts = new IISAlertService( RockContext )
-                    .Queryable()
-                    .OrderBy( a => a.Name )
-                    .ToList()
-                    .Select( IISAlertBag.FromEntity )
+                Alerts = alerts
+                    .Select( alert => IISAlertBag.FromEntity(
+                        alert,
+                        matchCounts.ContainsKey( alert.Id ) ? matchCounts[alert.Id] : 0 ) )
                     .ToList()
             };
         }
